@@ -96,14 +96,21 @@ def aspect_sincos(
 
     magnitude = np.hypot(east_component_downslope, north_component_downslope)
 
-    # Where magnitude > 0, unit vector = downslope / magnitude.
-    # Where magnitude == 0 (flat), leave as 0 — meaning "no direction."
-    # NaN inputs propagate naturally through arithmetic.
-    sin_interior = np.zeros_like(magnitude)
-    cos_interior = np.zeros_like(magnitude)
-    nonflat = magnitude > 0
-    sin_interior[nonflat] = east_component_downslope[nonflat] / magnitude[nonflat]
-    cos_interior[nonflat] = north_component_downslope[nonflat] / magnitude[nonflat]
+    # Three regimes to distinguish:
+    #   - NaN input in the 3x3 stencil  -> magnitude is NaN  -> output is NaN
+    #   - flat surface (genuine zero gradient) -> magnitude is exactly 0
+    #     -> output is (0, 0), meaning "no preferred direction"
+    #   - sloped surface -> output is the unit vector (east_comp, north_comp) / magnitude
+    # The naive masked-assign approach (sin[mag > 0] = ...) silently collapses
+    # NaN-magnitude cells into the "flat" bin, because NaN comparisons return
+    # False. The errstate-suppressed division below propagates NaN correctly,
+    # and we then override exact zeros to (0, 0).
+    with np.errstate(invalid="ignore", divide="ignore"):
+        sin_interior = east_component_downslope / magnitude
+        cos_interior = north_component_downslope / magnitude
+    flat = magnitude == 0
+    sin_interior = np.where(flat, 0.0, sin_interior)
+    cos_interior = np.where(flat, 0.0, cos_interior)
 
     sin_out[1:-1, 1:-1] = sin_interior
     cos_out[1:-1, 1:-1] = cos_interior

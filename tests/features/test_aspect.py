@@ -108,6 +108,39 @@ def test_no_nan_in_interior_for_finite_input():
     assert not np.any(np.isnan(cos_a[interior]))
 
 
+def test_nan_input_propagates_to_nan_output_not_zero_vector():
+    """Critical correctness: a nodata (NaN) pixel must not silently encode as
+    (0, 0) at the cells whose stencil consumed it — that would conflate "no
+    data" with "flat point" and is exactly the wrong-number failure mode the
+    sin/cos encoding was designed to avoid.
+
+    Horn nuance: the 3x3 first-derivative stencil uses 8 neighbors, NOT the
+    center pixel. So an isolated NaN at (i, j) corrupts the 8 surrounding
+    cells but NOT cell (i, j) itself — its 8 neighbors are valid, so it
+    computes as (0, 0). This is documented robustness, not a bug.
+    """
+    z = np.zeros((7, 7))
+    z[3, 3] = np.nan
+
+    sin_a, cos_a = aspect_sincos(z, 1.0, 1.0)
+
+    # The 8 cells surrounding (3, 3) should all be NaN — their stencils
+    # consumed the NaN. (3, 3) itself should be (0, 0) — Horn skips center.
+    for di in (-1, 0, 1):
+        for dj in (-1, 0, 1):
+            r, c = 3 + di, 3 + dj
+            if di == 0 and dj == 0:
+                assert sin_a[r, c] == 0.0, f"center (3,3) must be 0, got {sin_a[r, c]}"
+                assert cos_a[r, c] == 0.0
+            else:
+                assert np.isnan(sin_a[r, c]), f"neighbor ({r},{c}) must be NaN, got {sin_a[r, c]}"
+                assert np.isnan(cos_a[r, c])
+
+    # Cells far from the NaN should be unaffected — (0, 0) on a flat surface.
+    assert sin_a[5, 5] == 0.0
+    assert cos_a[5, 5] == 0.0
+
+
 def test_invalid_input_raises():
     with pytest.raises(ValueError):
         aspect_sincos(np.zeros(5), 1.0, 1.0)
