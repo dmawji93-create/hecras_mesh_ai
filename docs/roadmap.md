@@ -1,6 +1,17 @@
 # Roadmap
 
-Living document. Update as phases complete or pivot. Significant pivots get a corresponding ADR in `docs/decisions/`.
+Living document — the **strategic** view of the project. The **executable, checkpointed plan** lives in `docs/build-plan/`; that directory is the operational source of truth for day-to-day work. Significant pivots get a corresponding ADR in `docs/decisions/`.
+
+**Status as of 2026-05-23:** Phase A.0 Week 1 (plumbing) complete. Next: build-plan **Stage 1 — Feature & Label Pipeline**.
+
+**How the phases map to the build plan:**
+
+| Roadmap phase | Build-plan stages |
+|---|---|
+| Phase A — Breakline Detection | Stages 1-3 |
+| Phase B — Resolution Field + Static Mesh | Stages 4-5 |
+| Phase C — Adaptive Refinement | Stages 6-8 |
+| Phase D — Productionization & Future | build-plan `09-deferred-and-future.md` |
 
 ---
 
@@ -12,88 +23,44 @@ Living document. Update as phases complete or pivot. Significant pivots get a co
 
 **Why first:** Pure topographic CV problem with strong signal from DEM derivatives. Labels are abundant (every FEMA study has expert breaklines). Sidesteps the unsolved engineering of programmatic geometry HDF writes — emit a geopackage and import via the existing UI.
 
-### A.0 — Make-one-work sprint (4 weeks)
+- **A.0 — Make-one-work sprint.** Single-project pilot on Muncie, then Bald Eagle Dam Break — validate the whole pipeline end-to-end at small scale before investing in bulk data. **Week 1 (plumbing) is complete.** Remaining A.0 work is detailed as build-plan **Stage 1** (feature & label pipeline) and **Stage 2** (breakline model pilot).
+- **A.1 / A.2 — Scale and harden.** Bulk FEMA NFHL/MIP corpus, deduplication and quality filtering, a curated held-out validation set, retraining, robustness across DEM resolution/CRS, ancillary-data graceful degradation. Detailed as build-plan **Stage 3**.
 
-Single-project pilot on the HEC-RAS Muncie example, then Bald Eagle Dam Break. Goal: validate the entire pipeline end-to-end at small scale before investing in bulk data.
-
-**Week 1 — Plumbing**
-- src-layout repo (`hecras_mesh_ai`), `uv` environment, pytest + ruff + pre-commit
-- Install full stack (PyTorch, Lightning, smp, TorchGeo, rasterio, geopandas, rioxarray, rashdf, h5py, wandb)
-- Download Muncie + Bald Eagle example datasets
-- Exploration notebook: open `Muncie.g04.hdf` via rashdf, plot mesh, breaklines, perimeter, refinement regions over the terrain. Verify we can read everything we need.
-
-**Week 2 — Features + labels**
-- DEM derivatives module: slope, aspect, plan/profile curvature, TWI, flow accumulation, hydro-conditioned ridges. Each as a tested function.
-- Feature stacking into multi-channel xarray DataArrays
-- Breakline rasterization with configurable buffer width
-- TorchGeo-based train/val tile split with **spatial holdout** (not random — critical for geo data)
-
-**Week 3 — Model**
-- Lightning DataModule wrapping the TorchGeo dataset
-- LightningModule with a small smp U-Net (ResNet-18/34 encoder, ImageNet init)
-- Loss: BCE + Dice (handles severe class imbalance)
-- Sanity-check training: intentionally overfit a handful of tiles
-- W&B logging from day one
-
-**Week 4 — Post-process + reflect**
-- Probability threshold sweep
-- Skeletonize → vectorize → simplify (Douglas-Peucker) → smooth → polylines
-- Visual overlay of predicted vs expert breaklines
-- Buffer-based IoU and F1 metrics
-- Retrospective: what surprised us, what changes before scaling
-
-### A.1 — Scale to bulk
-
-- Inventory and download FEMA NFHL/MIP flood study HDFs at scale
-- Build a deduplication and quality-filter pipeline (some FEMA studies are excellent, others are not)
-- Curate a held-out validation set of ~10–20 high-quality projects across geographies and morphologies
-- Retrain the Phase A model on the bulk corpus
-- Evaluate on held-out projects
-
-### A.2 — Hardening
-
-- Robustness across DEM resolutions and CRS
-- Sensitivity to ancillary data availability (graceful degradation when NLD or land cover is missing)
-- Performance budgeting: end-to-end runtime, memory, GPU footprint
-- API design: how a modeler invokes this on their own project
+Per ADR 003 (amended), expert meshes are used as a **prior / warm start**, not as the final target.
 
 ---
 
 ## Phase B — Resolution Field + Complete Static Mesh
 
-**Goal:** Predict a continuous "nominal cell size" field across the domain, cluster into refinement region polygons, and combine with Phase A breaklines to produce a complete HEC-RAS geometry.
+**Goal:** Predict a continuous nominal-cell-size field across the domain, convert it into refinement region polygons, and combine with Phase A breaklines to produce a complete, runnable HEC-RAS geometry. Delivers the **Quick-tier product**: terrain in, expert-quality runnable mesh out, in seconds.
 
-**New engineering work:**
-- Geometry HDF5 writer (extending `rashdf` or building parallel writer)
-- Automated end-to-end pipeline: terrain → features → breaklines → resolution field → refinement regions → computation points → write `.gNN.hdf` → ready to run in HEC-RAS
-- Cell budget as a constraint (target total cell count)
+**Engineering:** The HEC-RAS automation harness — programmatic geometry-HDF5 writing, run launching, results parsing — is the enabling prerequisite. Detailed as build-plan **Stage 4** (harness) and **Stage 5** (resolution model + static-mesh assembly).
 
-**Modeling:**
-- Multi-task head on the shared encoder from Phase A (breaklines + resolution as joint outputs)
-- Labels from expert refinement regions in the bulk corpus
-- Optional: feed Phase A breakline predictions as an input channel to the resolution head
+**Modeling:** A resolution-field head multi-task on the shared Phase A encoder. Resolution is hydraulically driven, so the head's inputs include a-priori-knowable hydraulic context — boundary conditions, the Manning's *n* field, structures — not terrain alone. Labels from expert refinement regions; a total cell-budget acts as a constraint.
 
 ---
 
-## Phase C — Closed-Loop Adaptive Refinement
+## Phase C — Adaptive Refinement Against a Quantitative Objective
 
-**Goal:** Mesh → run HEC-RAS → assess solution-based error indicators → refine → re-run. Optimize for accuracy under a runtime budget.
+**Goal:** Take the Phase B warm-start mesh, run it, measure error against a quantitative objective, refine the high-error regions, and repeat until the user's tolerance vector is met — converging to optimal resolution per unit compute. Delivers the **Optimal-tier product**.
 
-**Dependencies:** A working Phase B static mesh as the starting point. Without this, Phase C is starting from random.
+This phase is defined by two ADRs:
 
-**Approach options (decide closer to time):**
-- Rule-based mesh adaptation driven by gradient / Froude / mass residual indicators
-- RL policy fine-tuned on top of the Phase B static mesh model
-- Bayesian optimization over refinement region parameters
+- **ADR 011 — Quantitative Mesh-Quality Objective.** Mesh quality is made measurable: a converged **reference solution** (v1: Richardson extrapolation; alternatives deferred), a **purpose-dependent error functional** (a vector of metrics — peak WSE, inundation extent, timing, velocity — each with a user-defined tolerance), and a **cost term**. Built as build-plan **Stage 6**.
+- **ADR 012 — Numerical-methods-first.** The refinement loop is classical adaptive mesh refinement — a mature, solved method — built first with no ML (build-plan **Stage 7**). ML is an **optional optimization layer** added afterward (build-plan **Stage 8**) to reduce iteration count and enable richer, anisotropic, breakline-aware refinement actions.
 
-**Reward / loss signal:** Composite of accuracy vs fine-mesh reference (or vs gauge data) and runtime / cell count. Exact form TBD.
+The loop uses a **progressive tolerance schedule**: start coarse and wide, get a cheap approximate solution, refine, tighten, repeat until the declared purpose is met.
 
 ---
 
-## Phase D — Productionization
+## Phase D — Productionization & Future
 
-- Standalone CLI tool
-- HEC-RAS plugin / RAS Mapper integration (long-term, depends on USACE plugin architecture)
-- Validation suite on held-out projects with documented performance metrics
-- Deployment: local desktop tool vs hosted service
-- Documentation, examples, tutorials
+- Standalone CLI tool; HEC-RAS plugin / RAS Mapper integration (long-term, depends on USACE plugin architecture).
+- Validation suite on held-out projects with documented performance metrics.
+- Deployment: local desktop tool vs hosted service.
+- Documentation, examples, tutorials.
+
+**Deferred / off the critical path** (see `docs/build-plan/09-deferred-and-future.md`):
+
+- **Terrain-to-hydraulics instant baseline tool** — a neural surrogate predicting approximate hydraulics from terrain + forcing, as a rapid screening tool. To be revisited only after the core mesh-generation product (Stages 1-8) is complete.
+- **Alternative reference-solution methods** — ultra-fine single mesh, self-convergence / local stopping, physical-observation anchoring, analytical benchmark cases. v1 ships Richardson extrapolation only.

@@ -1,78 +1,82 @@
 # HEC-RAS Mesh AI
 
-Automated 2D computational mesh generation for HEC-RAS using deep learning. Replaces the iterative manual workflow of breakline placement, refinement region selection, and resolution tuning with a learned system that proposes meshes from terrain and ancillary data.
+Automated 2D computational mesh generation for HEC-RAS using deep learning. Replaces the slow, iterative, intuition-bound manual workflow of breakline placement, refinement region selection, and resolution tuning with a learned system that proposes meshes from terrain and ancillary data — and then refines them against a measurable quantitative objective.
+
+Owner: Dante Mawji. License: Proprietary.
 
 ## Current status
 
-**Phase A — Breakline Detection** (active).
-Sprint: "make-one-work" pilot on the HEC-RAS Muncie example before scaling.
+**Phase A — Breakline Detection.** Phase A.0 Week 1 (plumbing) is complete (see `docs/STATUS.md`). Next: build-plan **Stage 1 — Feature & Label Pipeline**.
 
-See `docs/roadmap.md` for the full A → B → C plan and current sprint detail.
+## Two source-of-truth documents
+
+- `docs/roadmap.md` — the **strategic** phased view (A → B → C → D).
+- `docs/build-plan/` — the **executable, checkpointed plan**. One file per stage, each with hard exit criteria. This is the operational source of truth for day-to-day work; start at `00-build-plan-overview.md`.
 
 ## How I work with the user
 
-The user has deep HEC-RAS / hydraulic engineering expertise but is **new to ML and PyTorch**. Teach as you go: explain *why*, not just *what*. Prefer incremental progress over dumping finished solutions. When a new concept appears (tensor, autograd, U-Net, IoU, Dice loss, DataLoader, etc.), give a short conceptual primer before using it. Assume strong general engineering ability and strong domain knowledge — just no ML background.
+The user has deep HEC-RAS / hydraulic engineering expertise but is **new to ML and PyTorch**. Teach as you go: explain *why*, not just *what*. When a new concept appears (tensor, autograd, U-Net, IoU, Dice loss, DataLoader, LightningModule, etc.), give a short conceptual primer before using it. Assume strong general engineering ability — just no ML background.
 
-When proposing significant decisions (architecture, dependencies, sprint scope), surface the alternatives and tradeoffs, then recommend. Don't just execute silently on choices that have downstream implications.
+Walk through each step rather than dumping finished solutions. Surface significant decisions before making them: present alternatives and tradeoffs, recommend, let the user decide — then record the outcome as an ADR in `docs/decisions/` using `000-template.md`. Be candid; flag risks and uncertainty honestly.
 
 ## Tech stack
 
-- **Language:** Python 3.11+, environment managed with `uv`
+Per ADR 005 and ADR 010. Python 3.11-3.12, environment managed with `uv`.
+
 - **Core ML:** PyTorch + PyTorch Lightning
-- **Model architectures:** `segmentation_models_pytorch` (smp) — U-Net, DeepLabV3+, etc. with swappable encoders
-- **Geospatial DL:** TorchGeo (samplers, transforms, geo-aware datasets)
+- **Model architectures:** `segmentation_models_pytorch` (smp)
+- **Geospatial DL:** TorchGeo
 - **Geospatial I/O:** rasterio, geopandas, xarray + rioxarray, shapely
-- **Image processing:** scikit-image (skeletonize, morphology, vectorize)
-- **HEC-RAS I/O:** `rashdf` (read geometry/plan HDFs), `h5py` (low-level, eventual writes)
+- **Image processing:** scikit-image
+- **HEC-RAS I/O:** `rashdf` (read), `h5py` (low-level / Phase B writes)
 - **Experiment tracking:** Weights & Biases
 - **Quality:** pytest, ruff, pre-commit
-- **Configs (later):** Hydra
 
-Full rationale: `docs/decisions/005-tech-stack.md`. Compute target deferred until data scale is understood — see `docs/decisions/004-training-data-source.md`.
+Dependencies are split into `dev` and `ml` optional groups in `pyproject.toml`. Install with `uv sync --extra dev --extra ml`. `torch`/`torchvision` resolve from the PyTorch CUDA 12.8 index — see ADR 010; the `[tool.uv.sources]` block is Windows + CUDA specific.
 
 ## Workflow conventions
 
-- **Notebooks** (`notebooks/`) — exploration only. One-off plots, data sanity checks, "what does this look like." Notebooks are throwaway by default; nothing imports from them.
-- **Modules** (`src/hecras_mesh_ai/`) — keepers. Anything that gets imported or run more than twice lives here. Typed where it helps, tested where it matters.
-- **Tests** (`tests/`) — pytest. Run via pre-commit.
-- **ADRs** (`docs/decisions/`) — one markdown file per significant decision. If a decision is revisited, update the file's status and create a successor ADR — never silently rewrite history.
-- **Roadmap** (`docs/roadmap.md`) — living document. Update as phases progress; note what changed and why.
-- **Commits** — conventional commits format (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
-- **Branches** — `main` is protected; feature work happens on short-lived branches with PRs.
+- **Notebooks** (`notebooks/`) — exploration only. Throwaway by default; nothing imports from them. (ADR 009)
+- **Modules** (`src/hecras_mesh_ai/`) — keepers: anything imported or run more than twice.
+- **Tests** (`tests/`) — pytest, run via pre-commit.
+- **ADRs** (`docs/decisions/`) — one file per significant decision. Decisions are historical records: never silently rewrite one — mark it superseded, or amend it with a dated note (see ADR 003).
+- **Roadmap & build plan** — living documents; update as work completes.
+- **Commits** — conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
+- **Stage discipline** — do not start a build-plan stage until the previous stage's checkpoint criteria are all met and verified.
 
 ## Repository layout
 
 ```
 hecras_mesh_ai/
-├── CLAUDE.md                  # this file — auto-loaded by Claude Code
-├── README.md                  # public-facing entry point
-├── pyproject.toml             # project metadata + dependencies (uv)
+├── CLAUDE.md                       # this file — auto-loaded by Claude Code
+├── README.md
+├── pyproject.toml
+├── uv.lock
 ├── .pre-commit-config.yaml
+├── .gitattributes
+├── .gitignore
 ├── docs/
-│   ├── roadmap.md             # phased delivery plan
-│   ├── hec-ras-primer.md      # mesh concepts for ML folks
-│   └── decisions/             # ADRs
-├── src/hecras_mesh_ai/        # the package
-├── notebooks/                 # exploration only
-├── tests/                     # pytest
-└── data/                      # gitignored; raw + processed datasets
+│   ├── CLAUDE_CODE_KICKOFF.md      # paste-in prompt to start a session
+│   ├── STATUS.md                   # current project status
+│   ├── roadmap.md                  # strategic phased plan
+│   ├── hec-ras-primer.md           # mesh concepts for ML folks
+│   ├── decisions/                  # ADRs 000-012
+│   └── build-plan/                 # executable checkpointed stages 00-09
+├── src/hecras_mesh_ai/             # the package
+├── scripts/                        # helper scripts (e.g. verify_install.py)
+├── notebooks/                      # exploration
+├── tests/                          # pytest
+└── data/                           # gitignored
 ```
+
+## Decisions on record (ADRs)
+
+001 staged A→B→C delivery · 002 mixed/general-purpose scope · 003 training strategy (amended — expert meshes are a prior, not a target) · 004 hybrid FEMA + curated corpus · 005 tech stack · 006 pilot dataset · 007 make-one-work sprint · 008 Claude Code as system of record · 009 notebooks vs modules · 010 CUDA cu128 platform · 011 quantitative mesh-quality objective · 012 refinement loop is numerical-methods-first.
 
 ## HEC-RAS domain context
 
-If you're a Claude Code session without HEC-RAS background, read `docs/hec-ras-primer.md` first. Key terms you must understand before touching this codebase: *breakline*, *refinement region*, *computation point*, *2D flow area*, *sub-grid bathymetry*, *Voronoi mesh*, *cell face*.
-
-## Reference links
-
-- HEC-RAS 2D User's Manual: https://www.hec.usace.army.mil/confluence/rasdocs/r2dum/latest
-- 2D Computational Mesh Development: https://www.hec.usace.army.mil/confluence/rasdocs/r2dum/6.0/development-of-a-2d-or-combined-1d-2d-model/development-of-the-2d-computational-mesh
-- Sub-grid bathymetry theory: https://www.hec.usace.army.mil/confluence/rasdocs/ras1dtechref/theoretical-basis-for-one-dimensional-and-two-dimensional-hydrodynamic-calculations/2d-unsteady-flow-hydrodynamics/subgrid-bathymetry
-- Mesh quality best practices: https://www.hec.usace.army.mil/confluence/rasdocs/h2sd/ras2dsed/6.0/hydraulic-best-practices-for-a-2d-sediment-model/mesh-quality
-- rashdf: https://github.com/fema-ffrd/rashdf
-- TorchGeo: https://torchgeo.readthedocs.io
-- segmentation_models_pytorch: https://github.com/qubvel-org/segmentation_models.pytorch
-- PyTorch Lightning: https://lightning.ai/docs/pytorch/stable/
+If unfamiliar with HEC-RAS, read `docs/hec-ras-primer.md` first. Key terms: *breakline*, *refinement region*, *computation point*, *2D flow area*, *sub-grid bathymetry*, *Voronoi mesh*, *cell face*.
 
 ## When in doubt
 
-Ask the user before making non-trivial decisions. Document them in `docs/decisions/` afterward. The cost of an extra prompt is small; the cost of silent drift is large.
+Ask before making non-trivial decisions; document them as ADRs afterward. The cost of an extra prompt is small; the cost of silent drift is large.

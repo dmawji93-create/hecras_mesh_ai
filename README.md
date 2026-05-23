@@ -2,42 +2,36 @@
 
 > Automated 2D mesh generation for HEC-RAS using deep learning.
 
-Manual 2D mesh generation in HEC-RAS is slow, iterative, and computationally expensive. Modelers spend hours placing breaklines, defining refinement regions, and tuning cell resolution — then must run a simulation to discover whether the mesh performs adequately. This project aims to learn that workflow from expert-meshed projects and propose high-quality meshes directly from terrain and ancillary geospatial data.
+Manual 2D mesh generation in HEC-RAS is slow, iterative, and bounded by expert intuition — and hand-built meshes are imperfect and unauditable. This project learns the workflow from expert-meshed projects, proposes high-quality meshes directly from terrain and ancillary geospatial data, and then refines them against a measurable, quantitative objective. The goal is meshes that are **faster, better, and more quantifiable** than the manual process.
 
 ## Approach
 
-A staged plan: predict breaklines first (a topographic computer-vision problem), then add a learned resolution field for complete static meshes, then close the loop with solution-based adaptive refinement.
+A staged plan:
 
-- **Phase A** — Breakline detection from DEM + ancillary data
-- **Phase B** — + Refinement region / resolution field for complete static mesh
-- **Phase C** — Closed-loop mesh adaptation driven by simulation residuals
+- **Phase A** — Breakline detection from DEM + ancillary data.
+- **Phase B** — A learned resolution field for complete, runnable static meshes (the Quick tier).
+- **Phase C** — Adaptive refinement against a quantitative mesh-quality objective (the Optimal tier).
+- **Phase D** — Productionization.
 
-See [`docs/roadmap.md`](docs/roadmap.md) for detail.
+The strategic plan is in [`docs/roadmap.md`](docs/roadmap.md); the executable, checkpointed plan is in [`docs/build-plan/`](docs/build-plan/).
 
 ## Stack
 
-PyTorch + Lightning + segmentation_models_pytorch + TorchGeo, on top of the standard Python geospatial stack (rasterio, geopandas, xarray). HEC-RAS HDF I/O via `rashdf` and `h5py`. Experiment tracking with Weights & Biases.
+PyTorch + Lightning + segmentation_models_pytorch + TorchGeo, on the standard Python geospatial stack (rasterio, geopandas, xarray). HEC-RAS HDF I/O via `rashdf` and `h5py`. Experiment tracking with Weights & Biases. See [`docs/decisions/005-tech-stack.md`](docs/decisions/005-tech-stack.md).
 
 ## Status
 
-Phase A in early development. Pilot dataset: HEC-RAS official example projects (Muncie, Bald Eagle Dam Break).
-
-## Project structure
-
-```
-docs/                  # roadmap, decisions, domain primer
-src/hecras_mesh_ai/    # package
-notebooks/             # exploration
-tests/                 # pytest
-```
+Phase A, early development. Phase A.0 Week 1 (plumbing) complete. Pilot dataset: HEC-RAS official examples (Muncie, Bald Eagle Dam Break).
 
 ## Getting started
 
 ```bash
-uv sync
+uv sync --extra dev --extra ml
 uv run pre-commit install
 uv run pytest
 ```
+
+The `ml` extra resolves `torch`/`torchvision` from the PyTorch CUDA 12.8 index and is Windows + CUDA specific — see [`docs/decisions/010-cuda-platform.md`](docs/decisions/010-cuda-platform.md).
 
 ## Development
 
@@ -45,4 +39,4 @@ See [`CLAUDE.md`](CLAUDE.md) for working conventions and [`docs/decisions/`](doc
 
 ## License
 
-TBD.
+Proprietary.
