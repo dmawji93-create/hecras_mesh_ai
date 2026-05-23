@@ -68,6 +68,10 @@ GPU verified with a 4096×4096 matmul on `cuda:0` (~200 MB VRAM used).
 - **Project folder name has spaces** in the data path (`…/RAS Samples/Example_Projects_7_0/2D Unsteady Flow Hydraulics/…`). Working fine for `rashdf` and `rasterio`; flag if a CLI tool ever mishandles it.
 - **No git remote yet.** Repo is local-only; cloud backup via private GitHub remote is planned but not done.
 
+## Assumptions to verify at test time
+
+- **Raster row direction.** The aspect feature (and curvature features that build on the same gradient) assumes input DEMs are north-up rasters with row index increasing southward (rasterio `transform.e < 0`). Most modern DEM products satisfy this, but a legacy / converted DEM might not — symptom would be aspect rotated 180° on that source. The Stage 1 Task 3 feature-stacker is the right place to assert this at ingest. Diagnostic recipe in the `CONVENTION-TO-VERIFY` comment in `src/hecras_mesh_ai/features/aspect.py`.
+
 ## Recently closed
 
 - **Bald Eagle Dam Break opens cleanly with rashdf** (Stage 1 Task 1, 2026-05-23). Canonical pilot = `g09.hdf`. See `notebooks/02_baldeagle_explore.ipynb`.

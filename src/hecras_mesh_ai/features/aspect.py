@@ -16,6 +16,26 @@ Convention note: in a north-up raster, row index increases *southward*, so the
 Horn dz/dy (computed by row differencing) is the change going *south* — the
 opposite sign from change-going-north. The aspect math below flips that sign
 back so the returned compass azimuth aligns with geographic north.
+
+CONVENTION-TO-VERIFY (debugging breadcrumb).
+This module assumes input DEMs are north-up rasters where row index increases
+southward — the conventional layout rasterio produces. If aspect-derived
+training ever behaves strangely (e.g. the model mispredicts breakline
+orientation on one pilot but not the other, or aspect appears 180 degrees
+rotated), the most likely cause is a row-up vs row-down raster orientation
+mismatch. To diagnose:
+
+  1. After `with rasterio.open(dem_path) as src`, check `src.transform.e`:
+     - negative => row index increases southward (standard; aspect math here is correct)
+     - positive => row index increases northward (rare; aspect will be flipped 180 deg)
+  2. The feature-stacker (Stage 1 Task 3) is the right place to assert this
+     at runtime so the failure surfaces at ingest, not at training time.
+
+HEC-RAS itself does not expose row-orientation as a user-facing convention —
+modelers drop in a terrain TIFF + .prj and the orientation is whatever the
+TIFF carries. Most modern DEM products (USACE, USGS 3DEP, FEMA NFHL terrain)
+ship row-down (transform.e < 0), but legacy / converted products occasionally
+do not.
 """
 
 from __future__ import annotations
