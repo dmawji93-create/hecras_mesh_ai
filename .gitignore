@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Environments
+.venv/
+venv/
+env/
+.python-version
+
+# ML artefacts
+lightning_logs/
+wandb/
+*.ckpt
+*.pth
+*.pt
+outputs/
+runs/
+mlruns/
+
+# Data — large, regenerable, or external
+data/
+
+# Notebooks
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Build
+dist/
+build/
+
+# OS
+Thumbs.db
