@@ -1,29 +1,32 @@
 # Project Status — `hecras_mesh_ai`
 
-**As of:** 2026-05-22
-**Phase:** A.0 "make-one-work" sprint (Week 1 complete)
-**Repo:** `C:\dev\hecras_mesh_ai\AI Assisted Mesh Generation\`
-**Branch:** `master` · 5 commits · no remote yet
+**As of:** 2026-05-23
+**Phase:** A.0 "make-one-work" sprint — Week 1 plumbing complete; **next: build-plan Stage 1**
+**Repo:** `C:\dev\hecras_mesh_ai\`
+**Branch:** `main` · 4 commits · no remote yet
 
 ---
 
 ## What this project is
 
-Automated 2D computational mesh generation for HEC-RAS using deep learning. Replaces the manual workflow of breakline placement, refinement region selection, and resolution tuning with a learned system that proposes meshes from terrain + ancillary data. Staged delivery: **A** breaklines → **B** + resolution field for complete static meshes → **C** closed-loop adaptation against simulation runs.
+Automated 2D computational mesh generation for HEC-RAS using deep learning. Replaces the slow, intuition-bound manual workflow of breakline placement, refinement region selection, and resolution tuning with a learned system that proposes meshes from terrain + ancillary data and refines them against a measurable, quantitative objective (ADR 011). Staged delivery: **A** breaklines → **B** + resolution field for complete static meshes → **C** closed-loop adaptation against a quantitative objective → **D** productionization. See `docs/roadmap.md` for the strategic view; `docs/build-plan/` is the operational source of truth.
 
 ## What's done
 
-**Week 1 — Plumbing (complete).** Repository scaffolded with the `hecras_mesh_ai` package, `uv`-managed Python 3.12 environment, full ML/geospatial dependency stack installed, GPU enabled, pilot data in place, exploration notebook produced and verified end-to-end against the Muncie example. Pre-commit hooks (ruff, ruff-format, whitespace, large-file guard) active and tested. Five commits, all conventional-commit format. Project moved off OneDrive onto local SSD (`C:\dev\…`) after OneDrive caused hardlink and file-lock failures.
+**Week 1 — Plumbing (complete).** Repository scaffolded with the `hecras_mesh_ai` package, `uv`-managed Python 3.12 environment, full ML/geospatial dependency stack installed, GPU enabled, pilot data in place, exploration notebook produced and verified end-to-end against the Muncie example. Pre-commit hooks (ruff, ruff-format, whitespace, large-file guard) active and tested. All commits use conventional-commit format. Project moved off OneDrive onto local SSD (`C:\dev\…`) after OneDrive caused hardlink and file-lock failures (ADR 010 operational notes).
+
+**Post-Week-1 reconciliation (2026-05-23).** Added `docs/build-plan/` (10 stages) as the executable source of truth alongside the strategic roadmap; added ADR 011 (quantitative mesh-quality objective) and ADR 012 (refinement loop is numerical-methods-first); amended ADR 003 to reframe expert meshes as a prior, not the training target; rewrote `CLAUDE.md` and `README.md`; added `.gitattributes` (LF normalization) and `.gitignore` entry for `.claude/`.
 
 | Component | Status |
 |---|---|
-| Repo skeleton (`src/`, `tests/`, `notebooks/`, `docs/`, `data/`) | ✓ |
-| `pyproject.toml` (full ML stack declared) | ✓ |
+| Repo skeleton (`src/`, `tests/`, `notebooks/`, `docs/`, `data/`, `scripts/`) | ✓ |
+| `pyproject.toml` (full ML stack declared, `dev`/`ml` optional extras) | ✓ |
 | `uv.lock` (reproducible env) | ✓ |
 | Pre-commit hooks (ruff + format + safety) | ✓ |
 | Smoke tests (`pytest`) | ✓ 2/2 passing |
-| Pilot data (Muncie + Bald Eagle in `data/raw/usace/`) | ✓ |
+| Pilot data (Muncie + Bald Eagle in `data/raw/usace/RAS Samples/Example_Projects_7_0/2D Unsteady Flow Hydraulics/`) | ✓ |
 | `notebooks/01_muncie_explore.ipynb` (read + plot verified) | ✓ |
+| Build-plan + ADRs 011-012 + ADR 003 amendment | ✓ (2026-05-23) |
 
 ## Current environment
 
@@ -49,19 +52,25 @@ GPU verified with a 4096×4096 matmul on `cuda:0` (~200 MB VRAM used).
 
 ## Decisions on record (ADRs in `docs/decisions/`)
 
-001 Staged A → B → C delivery · 002 Mixed/general scope · 003 Supervised pretrain + performance fine-tune · 004 Hybrid FEMA + curated corpus · 005 Tech stack (PyTorch + Lightning + smp + TorchGeo) · 006 Pilot dataset (HEC-RAS official examples) · 007 Make-one-work sprint · 008 Claude Code in VS Code as system of record · 009 Notebooks for exploration, modules for keepers · **010 CUDA 12.8 via PyTorch index (RTX 3090), OneDrive operational notes**.
+001 Staged A → B → C delivery · 002 Mixed/general scope · 003 Supervised pretrain + performance fine-tune **(amended 2026-05-23 — expert meshes are a prior, not the target)** · 004 Hybrid FEMA + curated corpus · 005 Tech stack (PyTorch + Lightning + smp + TorchGeo) · 006 Pilot dataset (HEC-RAS official examples) · 007 Make-one-work sprint · 008 Claude Code in VS Code as system of record · 009 Notebooks for exploration, modules for keepers · 010 CUDA 12.8 via PyTorch index (RTX 3090), OneDrive operational notes · **011 Quantitative mesh-quality objective** · **012 Refinement loop is numerical-methods-first; ML is an optional optimization layer**.
 
 ## Known open items
 
-- **Bald Eagle Dam Break** not yet opened. Worth a quick check at the start of Week 2 to see if its newer HDF format embeds CRS properly (would let us prefer-HDF, fall-back-terrain).
-- **Project folder name has spaces** (`AI Assisted Mesh Generation`). Working fine; flag if a CLI tool ever mishandles it.
+- **Bald Eagle Dam Break** not yet opened. Multiple geometries exist (`.g01.hdf` through `.g13.hdf`); canonical reference geometry not yet chosen. Resolves in Stage 1 Task 1.
+- **CRS embedding behavior** in Bald Eagle's HDFs — unknown until opened. Resolves in Stage 1 Task 1.
+- **Project folder name has spaces** in the data path (`…/RAS Samples/Example_Projects_7_0/2D Unsteady Flow Hydraulics/…`). Working fine for `rashdf`; flag if a CLI tool ever mishandles it.
 - **No git remote yet.** Repo is local-only; cloud backup via private GitHub remote is planned but not done.
 - **`refinement_regions()` returns an empty GeoDataFrame with no geometry column when empty.** Worked around in the notebook; possibly upstream rashdf bug worth filing later.
 
-## Next: Week 2 — Features and labels
+## Next: Build-plan Stage 1 — Feature & Label Pipeline
 
-1. **DEM derivatives module** — slope, aspect, plan/profile curvature, TWI, flow accumulation. Each a tested function in `src/hecras_mesh_ai/features/`.
-2. **Breakline rasterizer** — `breaklines` GeoDataFrame → binary label raster aligned to the DEM grid, configurable buffer width.
-3. **TorchGeo-based dataset + spatial-holdout tile split** — wrap Muncie (and Bald Eagle) for sampling, with explicit spatial separation between train and val tiles.
+Detailed in `docs/build-plan/01-feature-and-label-pipeline.md`. Summary:
 
-After Week 2 we'll have features in / labels out, ready for Week 3 to train a U-Net.
+1. **Open Bald Eagle Dam Break with rashdf** — confirm CRS handling, pick the canonical `.gNN.hdf`, inventory breaklines/refinement regions/cells.
+2. **DEM-derivatives module** (`src/hecras_mesh_ai/features/`) — slope, aspect, plan/profile curvature, TWI, flow accumulation. Each a tested, typed function.
+3. **Feature stacking** into a CRS-aware multi-channel array (xarray + rioxarray); verify CRS, resolution, extent alignment across all channels.
+4. **Breakline rasterizer** — `breaklines` GeoDataFrame → binary label raster aligned to the DEM grid, configurable buffer width.
+5. **TorchGeo dataset + spatial-holdout split** — wrap Muncie + Bald Eagle for sampling with explicit spatial separation between train and val tiles.
+6. **Exploration notebook** visualizing every feature channel and the label raster overlaid on terrain.
+
+Stage 1 exit criteria (must all pass before Stage 2): every DEM-derivative has passing unit tests; feature channels aligned (CRS / resolution / extent) verified visually and programmatically; breakline label raster pixel-aligned with feature stack; train/val tiles spatially separated with zero overlap (leakage check); pipeline runs end-to-end on both pilots; `pytest` green; pre-commit clean.
