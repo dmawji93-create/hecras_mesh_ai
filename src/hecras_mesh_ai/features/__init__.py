@@ -5,6 +5,7 @@ Each derivative is a thin, tested, pure-numpy function: 2D elevation array in,
 lives outside this module (see Stage 1 Task 3).
 """
 
+from hecras_mesh_ai.features.aspect import aspect_sincos
 from hecras_mesh_ai.features.slope import slope
 
-__all__ = ["slope"]
+__all__ = ["aspect_sincos", "slope"]
