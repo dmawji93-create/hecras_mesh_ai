@@ -7,6 +7,7 @@ lives outside this module (see Stage 1 Task 3).
 
 from hecras_mesh_ai.features.aspect import aspect_sincos
 from hecras_mesh_ai.features.plan_curvature import plan_curvature
+from hecras_mesh_ai.features.profile_curvature import profile_curvature
 from hecras_mesh_ai.features.slope import slope
 
-__all__ = ["aspect_sincos", "plan_curvature", "slope"]
+__all__ = ["aspect_sincos", "plan_curvature", "profile_curvature", "slope"]
