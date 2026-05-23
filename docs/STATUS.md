@@ -42,13 +42,22 @@ Automated 2D computational mesh generation for HEC-RAS using deep learning. Repl
 
 GPU verified with a 4096×4096 matmul on `cuda:0` (~200 MB VRAM used).
 
-## What we learned from the Muncie read
+## What we learned from the pilots
 
-- HEC-RAS Muncie geometry HDF (`Muncie.g04.hdf`) opens cleanly via `rashdf`.
-- The HDF does *not* embed a CRS. The authoritative CRS lives on the terrain TIFF: **EPSG:2965 (NAD83 / Indiana East ftUS)**. Pipeline must source CRS from terrain when the HDF lacks it.
-- Mesh: **5,391 cells**, 5,391 computation points, 1 perimeter polygon, **2 breaklines** ("Road 1" + "HighGround 1"), **0 refinement regions**.
-- Terrain: 4,538 × 7,892 pixels at 5 ft resolution, elevation 898.9 → 1,013.2 ft (low-relief Indiana). Mesh sits comfortably inside terrain extent.
-- Muncie is for plumbing only — 2 breakline labels is not a training signal.
+**Muncie (`Muncie.g04.hdf`):**
+- Opens cleanly via `rashdf`. HDF does *not* embed a CRS — sourced from the terrain TIFF: **EPSG:2965 (NAD83 / Indiana East ftUS)**.
+- Mesh: 5,391 cells, 1 perimeter, 2 breaklines (`Road 1`, `HighGround 1`), 0 refinement regions.
+- Terrain: 4,538 × 7,892 pixels at 5 ft resolution. Low-relief (898.9 → 1,013.2 ft). Mesh sits inside terrain.
+- Plumbing pilot only — 2 breakline labels is not a training signal.
+
+**Bald Eagle Dam Break (Stage 1 Task 1, see `notebooks/02_baldeagle_explore.ipynb`):**
+- Ships **12 alternate geometry definitions** of the same flow area (`.g01–.g13.hdf`, skipping `.g04/.g05/.g07`).
+- **Canonical pilot pick:** `BaldEagleDamBrk.g09.hdf` — 18,066 cells, **4 semantically named breaklines** (`SayersDam`, `Lower`, `Middle`, `Upper`), the only geometry of the 12 with a CRS **embedded directly in the HDF** (EPSG:2271, NAD83 / Pennsylvania North ftUS).
+- **Secondary pilot:** `BaldEagleDamBrk.g02.hdf` — 28,449 cells, 7 breaklines (`Lower`, `Middle`, `HighwayRoad`, plus four generic `Breakline 1–4` helpers). More label samples but noisier per ADR 003 (amended).
+- **Zero refinement regions across all 12 Bald Eagle geometries.** The pilots produce no refinement-region labels — that's Stage 3 / bulk-corpus work.
+- DEM (`Terrain50.baldeagledem.tif`): 6,902 × 8,643 pixels at ~36.5 ft resolution (despite the misleading "50" in the filename), covering ~63 mi × 50 mi. Both meshes fit comfortably inside.
+
+**Cross-pilot finding:** CRS embedding in HEC-RAS HDFs is **variable** — sometimes present, usually not. The feature pipeline must implement **prefer-HDF-CRS, fall-back-terrain** as a first-class behavior.
 
 ## Decisions on record (ADRs in `docs/decisions/`)
 
@@ -56,11 +65,14 @@ GPU verified with a 4096×4096 matmul on `cuda:0` (~200 MB VRAM used).
 
 ## Known open items
 
-- **Bald Eagle Dam Break** not yet opened. Multiple geometries exist (`.g01.hdf` through `.g13.hdf`); canonical reference geometry not yet chosen. Resolves in Stage 1 Task 1.
-- **CRS embedding behavior** in Bald Eagle's HDFs — unknown until opened. Resolves in Stage 1 Task 1.
-- **Project folder name has spaces** in the data path (`…/RAS Samples/Example_Projects_7_0/2D Unsteady Flow Hydraulics/…`). Working fine for `rashdf`; flag if a CLI tool ever mishandles it.
+- **Project folder name has spaces** in the data path (`…/RAS Samples/Example_Projects_7_0/2D Unsteady Flow Hydraulics/…`). Working fine for `rashdf` and `rasterio`; flag if a CLI tool ever mishandles it.
 - **No git remote yet.** Repo is local-only; cloud backup via private GitHub remote is planned but not done.
-- **`refinement_regions()` returns an empty GeoDataFrame with no geometry column when empty.** Worked around in the notebook; possibly upstream rashdf bug worth filing later.
+
+## Recently closed
+
+- **Bald Eagle Dam Break opens cleanly with rashdf** (Stage 1 Task 1, 2026-05-23). Canonical pilot = `g09.hdf`. See `notebooks/02_baldeagle_explore.ipynb`.
+- **CRS embedding behavior characterized** (Stage 1 Task 1, 2026-05-23). Variable across HDFs; pipeline needs prefer-HDF-fall-back-terrain resolver. Both Muncie and 11/12 Bald Eagle geometries fall back to terrain; `g09` is the HDF-embedded case.
+- **`rashdf.refinement_regions()` empty-frame bug** — no longer surfaces under 0.12.0; returns `len() == 0` cleanly on all 12 Bald Eagle geometries and Muncie.
 
 ## Next: Build-plan Stage 1 — Feature & Label Pipeline
 
