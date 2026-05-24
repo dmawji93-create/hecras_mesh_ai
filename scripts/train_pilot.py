@@ -189,12 +189,21 @@ def main() -> None:
 
     callbacks = []
     if not args.overfit:
+        # Two checkpoints saved: best-by-train-loss + the last epoch.
+        # We monitor train/total_loss_epoch (not val) because the val loop
+        # uses representative sampling on a sparse-positive dataset --
+        # most val tiles are empty, so val loss is dominated by trivial
+        # "predict 0" success and the val-loss-best checkpoint is the one
+        # that learned to predict nothing. Discovered the hard way in the
+        # first pilot run. Train loss is a more honest "is the model
+        # learning?" signal under our biased sampling regime.
         callbacks.append(
             ModelCheckpoint(
-                monitor="val/total_loss",
+                monitor="train/total_loss_epoch",
                 mode="min",
                 save_top_k=1,
-                filename="best-{epoch:02d}-{val/total_loss:.4f}",
+                save_last=True,
+                filename="best-{epoch:02d}-{train/total_loss_epoch:.4f}",
             )
         )
 
