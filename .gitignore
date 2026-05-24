@@ -26,6 +26,7 @@ wandb/
 outputs/
 runs/
 mlruns/
+csv_logs/
 
 # Data — large, regenerable, or external
 data/
