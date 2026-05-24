@@ -14,10 +14,12 @@ This module bridges the two:
 """
 
 from hecras_mesh_ai.postprocess.breaklines import probability_to_polylines
+from hecras_mesh_ai.postprocess.inference import sliding_window_predict
 from hecras_mesh_ai.postprocess.metrics import BufferedMetrics, buffered_iou_f1
 
 __all__ = [
     "BufferedMetrics",
     "buffered_iou_f1",
     "probability_to_polylines",
+    "sliding_window_predict",
 ]
