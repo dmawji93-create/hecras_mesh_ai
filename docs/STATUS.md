@@ -1,9 +1,9 @@
 # Project Status — `hecras_mesh_ai`
 
 **As of:** 2026-05-23
-**Phase:** A.0 "make-one-work" sprint — **build-plan Stage 1 complete**; next: Stage 2 (Breakline Model Pilot)
+**Phase:** A.0 "make-one-work" sprint — **build-plan Stages 1+2 complete**; next: Stage 3 (Breakline Model Scale — bulk FEMA corpus)
 **Repo:** `C:\dev\hecras_mesh_ai\`
-**Branch:** `main` · 20 commits · no remote yet
+**Branch:** `main` · 36 commits · no remote yet
 
 ---
 
@@ -99,17 +99,33 @@ GPU verified with a 4096×4096 matmul on `cuda:0` (~200 MB VRAM used).
 - **CRS embedding behavior characterized** (Stage 1 Task 1, 2026-05-23). Variable across HDFs; pipeline needs prefer-HDF-fall-back-terrain resolver. Both Muncie and 11/12 Bald Eagle geometries fall back to terrain; `g09` is the HDF-embedded case.
 - **`rashdf.refinement_regions()` empty-frame bug** — no longer surfaces under 0.12.0; returns `len() == 0` cleanly on all 12 Bald Eagle geometries and Muncie.
 
-## Next: Build-plan Stage 2 — Breakline Model (Pilot)
+**Build-plan Stage 2 — Breakline Model Pilot (complete, 2026-05-23).** All eight tasks landed across ~16 commits:
 
-Detailed in `docs/build-plan/02-breakline-model-pilot.md`. Summary:
+| Task | Module | Tests |
+|---|---|---|
+| 1 — Lightning DataModule | `src/hecras_mesh_ai/model/datamodule.py` | 6 |
+| 2 — BCE + Dice loss | `src/hecras_mesh_ai/model/loss.py` | 13 |
+| 1b — BreaklineUNet LightningModule (smp U-Net + ResNet-18 + ImageNet) | `src/hecras_mesh_ai/model/unet.py` | 10 |
+| 3 — Training script with CSVLogger | `scripts/train_pilot.py` | (smoke) |
+| 4 — Overfit sanity check (BCE 0.79→0.024, Dice 0.98→0.35) | commit `7210cfa` | runs on GPU |
+| 5 — Full pilot training (30 epochs, ~17 min on RTX 3090) | `lightning_logs/pilot/` | live |
+| 6 — Probability-to-polylines post-processing | `src/hecras_mesh_ai/postprocess/breaklines.py` | 8 |
+| 7 — Buffered IoU/F1 metrics + sliding-window inference | `src/hecras_mesh_ai/postprocess/{metrics,inference}.py` | 16 |
+| 8 — Results notebook | `notebooks/04_stage2_pilot_results.ipynb` | runs end-to-end |
 
-1. PyTorch Lightning `DataModule` wrapping the Stage 1 `IterableTileDataset`.
-2. `LightningModule` with a small `segmentation_models_pytorch` U-Net (ResNet-18/34 encoder, ImageNet init).
-3. BCE + Dice loss to handle the ~99/1 class imbalance the Stage 1 exit notebook confirmed.
-4. W&B logging from the first run.
-5. **Overfit sanity check** on a handful of tiles — loss must drive to near-zero. Validates the gradient path.
-6. Full pilot training run on Bald Eagle g09; val on Muncie.
-7. Post-processing chain: probability threshold → skeletonize → vectorize → simplify → smooth → polylines.
-8. Buffer-based IoU / F1 against expert breaklines.
+**Stage 2 final pilot results** (deliberately-overfit per build plan):
 
-Stage 2 exit criteria: overfit-loss collapses, full pilot run completes + logs to W&B, end-to-end terrain → polyline path works, IoU/F1 computed against expert, visualized overlays, pytest + pre-commit clean. Overfit on the pilot is expected and is the point — Stage 3 is where generalization gets attacked.
+- Train (Bald Eagle g09, model SAW): precision 0.21, **recall 0.79**, F1 0.33, IoU 0.20 against expert breaklines
+- Val (Muncie, UNSEEN): precision/recall/F1/IoU = 0 — model fired 784 predicted positive pixels but none within 3 pixels of any actual Muncie breakline
+
+Honest read: the model learned Bald Eagle's specific breakline morphology (~80% recall on the project it saw) but overfit hard to it, with zero transfer to Muncie. **This is exactly what the build plan predicted** — Stage 2's purpose was pipeline validation, not generalization; Stage 3 + bulk corpus is what makes the model actually learn what makes a breakline universally.
+
+**Bugs caught (and fixed) during Stage 2 — all caught by the deliberately-overfit pilot doing its job:**
+
+1. **Tile sampler accepted NaN-containing tiles** (Stage 1 design oversight) — fixed via `IterableTileDataset(skip_nan_tiles=True)` with explicit retry loop. Without this, the very first val pass crashed to NaN loss.
+2. **Random sampling can't learn rare-positive classes** — at ~0.005% positive rate, BCE alone converges to "predict 0 everywhere." Fixed via positive-CENTERED sampling (`RasterTileDataset.positive_pixel_rowcol` + `RandomTileSampler.next_positive_centered_bbox`), gated by `positive_fraction`.
+3. **Checkpoint monitor=val/total_loss selected a degenerate "predict zero" model** — val loss is dominated by trivial empty-tile success, so "best by val" picked the most-zero-predicting epoch. Fixed by monitoring `train/total_loss_epoch` and adding `save_last=True`. Saved checkpoint after first training run was loadable but predicted nothing on any input; second training run with the fix produced the real results above.
+
+## Next: Build-plan Stage 3 — Breakline Model at Scale
+
+Detailed in `docs/build-plan/03-breakline-model-scale.md`. The bulk FEMA NFHL/MIP corpus acquisition + integration + quality-filtered training. This is where the real generalization story begins.
