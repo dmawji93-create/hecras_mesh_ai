@@ -120,6 +120,21 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="DataLoader subprocesses. Default 0 — Windows-safe.",
     )
+    p.add_argument(
+        "--train-positive-fraction",
+        type=float,
+        default=0.5,
+        help="Fraction of training tiles biased to contain at least one "
+        "breakline pixel. Counters the ~99/1 class imbalance. Default 0.5. "
+        "Use 0 (no bias) for ablation runs.",
+    )
+    p.add_argument(
+        "--val-positive-fraction",
+        type=float,
+        default=None,
+        help="Same for validation. Default unset (representative natural "
+        "distribution). Set to 0.5 if val loss is too noisy to compare.",
+    )
     return p.parse_args()
 
 
@@ -157,6 +172,8 @@ def main() -> None:
         num_workers=args.num_workers,
         train_seed=args.seed,
         val_seed=args.seed + 1,
+        train_positive_fraction=args.train_positive_fraction,
+        val_positive_fraction=args.val_positive_fraction,
     )
 
     model = BreaklineUNet(

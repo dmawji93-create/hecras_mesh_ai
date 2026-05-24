@@ -55,6 +55,16 @@ class BreaklinePilotDataModule(pl.LightningDataModule):
         seed so the two samplers don't produce coincidentally identical
         bbox sequences (they sample from disjoint datasets, but matching
         sequences would still be a confusing coincidence).
+    train_positive_fraction
+        Bias each yielded *training* tile so labels.sum() > 0 with this
+        probability. Default 0.5 — half of training tiles are guaranteed
+        to contain breakline pixels. Counters the ~99/1 class imbalance
+        that would otherwise leave Dice loss stuck at ~1 (model gaming
+        BCE by predicting "0 everywhere"). Set to None for representative
+        natural-distribution training (not recommended on these pilots).
+    val_positive_fraction
+        Same for validation. Default None — validation should reflect
+        the real distribution the model will see at inference.
     """
 
     def __init__(
@@ -71,6 +81,8 @@ class BreaklinePilotDataModule(pl.LightningDataModule):
         num_workers: int = 0,
         train_seed: int = 42,
         val_seed: int = 43,
+        train_positive_fraction: float | None = 0.5,
+        val_positive_fraction: float | None = None,
     ):
         super().__init__()
         # save_hyperparameters captures every __init__ kwarg into self.hparams
@@ -103,6 +115,7 @@ class BreaklinePilotDataModule(pl.LightningDataModule):
         dataset: RasterTileDataset,
         seed: int,
         samples_per_epoch: int,
+        positive_fraction: float | None,
     ) -> DataLoader:
         sampler = RandomTileSampler(
             dataset,
@@ -110,7 +123,12 @@ class BreaklinePilotDataModule(pl.LightningDataModule):
             samples_per_epoch=samples_per_epoch,
             seed=seed,
         )
-        iterable = IterableTileDataset(dataset, sampler)
+        iterable = IterableTileDataset(
+            dataset,
+            sampler,
+            positive_fraction=positive_fraction,
+            bias_seed=seed,
+        )
         return DataLoader(
             iterable,
             batch_size=self.hparams.batch_size,
@@ -123,6 +141,7 @@ class BreaklinePilotDataModule(pl.LightningDataModule):
             self._train_ds,
             seed=self.hparams.train_seed,
             samples_per_epoch=self.hparams.train_samples_per_epoch,
+            positive_fraction=self.hparams.train_positive_fraction,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -131,4 +150,5 @@ class BreaklinePilotDataModule(pl.LightningDataModule):
             self._val_ds,
             seed=self.hparams.val_seed,
             samples_per_epoch=self.hparams.val_samples_per_epoch,
+            positive_fraction=self.hparams.val_positive_fraction,
         )

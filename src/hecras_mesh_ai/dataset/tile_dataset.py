@@ -74,6 +74,26 @@ class RasterTileDataset:
         self.cellsize_x = float(abs(self.transform.a))
         self.cellsize_y = float(abs(self.transform.e))
 
+        # Positive-pixel coordinates: loaded lazily on first access. The full
+        # labels raster is small (single uint8 band) and the index is the
+        # key to efficient positive-biased sampling on rare-positive datasets
+        # — rejection sampling would burn 100+ attempts per positive tile.
+        self._positive_pixel_rowcol: np.ndarray | None = None
+
+    @property
+    def positive_pixel_rowcol(self) -> np.ndarray:
+        """Return all (row, col) integer coordinates where labels == 1.
+
+        Loaded once on first access and cached. Shape (N, 2), dtype int64.
+        Empty if no positives.
+        """
+        if self._positive_pixel_rowcol is None:
+            with rasterio.open(self.labels_path) as la:
+                labels = la.read(1)
+            rows, cols = np.where(labels > 0)
+            self._positive_pixel_rowcol = np.stack([rows, cols], axis=1).astype(np.int64)
+        return self._positive_pixel_rowcol
+
     def _bbox_inside_bounds(self, bbox: BBox) -> bool:
         left, bottom, right, top = self.bounds
         minx, miny, maxx, maxy = bbox
@@ -161,6 +181,38 @@ class RandomTileSampler:
         y = float(self.rng.uniform(bottom, top - self.tile_h))
         return (x, y, x + self.tile_w, y + self.tile_h)
 
+    def next_positive_centered_bbox(self) -> BBox:
+        """Pick a random positive pixel and return a tile centered on it.
+
+        For rare-positive datasets (breaklines are ~0.005% of pixels on
+        Bald Eagle), rejection sampling burns 100+ attempts per positive
+        tile. This direct method picks a positive (row, col) from the
+        pre-computed index, converts to CRS-space coordinates, and
+        returns the centered tile bbox (clamped to dataset bounds).
+        """
+        coords = self.dataset.positive_pixel_rowcol
+        if coords.size == 0:
+            raise RuntimeError(
+                f"Dataset has no positive pixels — cannot center tiles. "
+                f"Check labels file: {self.dataset.labels_path}"
+            )
+
+        # Pick one positive pixel.
+        i = int(self.rng.integers(coords.shape[0]))
+        row, col = coords[i]
+
+        # Convert pixel (row, col) -> CRS-space (x, y) at pixel center.
+        transform = self.dataset.transform
+        cx = transform.c + transform.a * (col + 0.5)
+        cy = transform.f + transform.e * (row + 0.5)
+
+        # Center the tile on (cx, cy), clamp to dataset bounds so the
+        # whole tile lies inside.
+        left, bottom, right, top = self.dataset.bounds
+        minx = max(left, min(cx - self.tile_w / 2, right - self.tile_w))
+        miny = max(bottom, min(cy - self.tile_h / 2, top - self.tile_h))
+        return (minx, miny, minx + self.tile_w, miny + self.tile_h)
+
 
 class IterableTileDataset(IterableDataset):
     """PyTorch IterableDataset adapter — pairs a RasterTileDataset with a sampler.
@@ -181,6 +233,17 @@ class IterableTileDataset(IterableDataset):
     training silently corrupts to NaN loss. The default `skip_nan_tiles=True`
     rejects any tile whose features contain any NaN and draws a replacement
     bbox; `max_attempts_per_tile` caps the retry loop.
+
+    Positive-content biasing. The breakline-detection positive class is rare
+    (~0.9% of pixels per the Stage 1 exit notebook). Random tiles mostly
+    contain no breakline pixels, so the model can game BCE by predicting
+    "0 everywhere" and never learns the positive class (Dice stays stuck at
+    ~1). Pass `positive_fraction` in [0, 1] to **upweight** positive tiles:
+    on each yield, with probability `positive_fraction`, the iterator
+    insists on a tile with `labels.sum() > 0`; the rest of the time, any
+    NaN-clean tile is accepted (which on these pilots will mostly be
+    empty — matching the natural distribution). Default None disables
+    biasing entirely — representative sampling, appropriate for validation.
     """
 
     def __init__(
@@ -189,36 +252,71 @@ class IterableTileDataset(IterableDataset):
         sampler: RandomTileSampler,
         *,
         skip_nan_tiles: bool = True,
+        positive_fraction: float | None = None,
         max_attempts_per_tile: int = 50,
+        bias_seed: int = 0,
     ):
         super().__init__()
         if max_attempts_per_tile < 1:
             raise ValueError(f"max_attempts_per_tile must be >= 1, got {max_attempts_per_tile}")
+        if positive_fraction is not None and not 0.0 <= positive_fraction <= 1.0:
+            raise ValueError(f"positive_fraction must be in [0, 1], got {positive_fraction}")
         self.raster_dataset = raster_dataset
         self.sampler = sampler
         self.skip_nan_tiles = skip_nan_tiles
+        self.positive_fraction = positive_fraction
         self.max_attempts_per_tile = max_attempts_per_tile
+        self._bias_rng = np.random.default_rng(bias_seed)
+
+    def _tile_acceptable(
+        self,
+        features: torch.Tensor,
+        labels: torch.Tensor,
+        must_be_positive: bool,
+    ) -> bool:
+        if self.skip_nan_tiles and torch.isnan(features).any():
+            return False
+        # Positive-required slot rejects empty tiles; no other constraint
+        # on label content (no "must-be-empty" branch — see class docstring).
+        return not (must_be_positive and labels.sum() == 0)
 
     def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
-        if not self.skip_nan_tiles:
+        # Fast path: no filtering at all.
+        if not self.skip_nan_tiles and self.positive_fraction is None:
             for bbox in self.sampler:
                 yield self.raster_dataset.sample(bbox)
             return
 
-        # NaN-rejection path: for each of the sampler's samples_per_epoch
-        # slots, call sampler.next_bbox() repeatedly until we find a
-        # NaN-free tile (or until we exhaust max_attempts_per_tile).
         for _ in range(self.sampler.samples_per_epoch):
+            # Coin-flip whether this slot must contain a breakline pixel.
+            # Asymmetric semantics: "must_be_positive=True" hard-requires
+            # labels.sum() > 0; "False" places no requirement (any non-NaN
+            # tile is fine, including empties — which dominate the
+            # natural distribution on these pilots). positive_fraction=None
+            # is equivalent to always-False.
+            must_be_positive = (
+                self.positive_fraction is not None
+                and self._bias_rng.random() < self.positive_fraction
+            )
+
             for _attempt in range(self.max_attempts_per_tile):
-                bbox = self.sampler.next_bbox()
+                # Positive-centered draw when must_be_positive (efficient
+                # on rare-positive datasets); random otherwise.
+                bbox = (
+                    self.sampler.next_positive_centered_bbox()
+                    if must_be_positive
+                    else self.sampler.next_bbox()
+                )
                 features, labels = self.raster_dataset.sample(bbox)
-                if not torch.isnan(features).any():
+                if self._tile_acceptable(features, labels, must_be_positive):
                     yield features, labels
                     break
             else:
                 raise RuntimeError(
-                    f"Could not find a NaN-free tile in "
-                    f"{self.max_attempts_per_tile} attempts. The dataset "
-                    f"likely has very large NaN regions; investigate the "
-                    f"source or raise max_attempts_per_tile."
+                    f"Could not find an acceptable tile in "
+                    f"{self.max_attempts_per_tile} attempts "
+                    f"(skip_nan_tiles={self.skip_nan_tiles}, "
+                    f"must_be_positive={must_be_positive}). The dataset may "
+                    f"have very large NaN regions or too few positive pixels; "
+                    f"investigate the source or raise max_attempts_per_tile."
                 )
