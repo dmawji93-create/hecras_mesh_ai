@@ -147,9 +147,15 @@ class RandomTileSampler:
 
     def __iter__(self) -> Iterator[BBox]:
         for _ in range(self.samples_per_epoch):
-            yield self._random_bbox()
+            yield self.next_bbox()
 
-    def _random_bbox(self) -> BBox:
+    def next_bbox(self) -> BBox:
+        """Draw one random bbox from the dataset's bounds.
+
+        Public so that NaN-rejection consumers (IterableTileDataset) can
+        call it directly in a retry loop without exhausting the
+        __iter__ stream.
+        """
         left, bottom, right, top = self.dataset.bounds
         x = float(self.rng.uniform(left, right - self.tile_w))
         y = float(self.rng.uniform(bottom, top - self.tile_h))
@@ -167,17 +173,52 @@ class IterableTileDataset(IterableDataset):
     behavior). For deterministic training across worker counts, set
     samples_per_epoch on the sampler and let the DataLoader handle worker
     sharding via its own seed.
+
+    NaN-tile rejection. Real DEMs have nodata regions (water bodies, off-survey
+    areas, etc.) that the Stage 1 hybrid conditioner deliberately preserves as
+    NaN — only isolated single-pixel holes get patched. If a random tile
+    overlaps a preserved-NaN region, its features contain NaN and downstream
+    training silently corrupts to NaN loss. The default `skip_nan_tiles=True`
+    rejects any tile whose features contain any NaN and draws a replacement
+    bbox; `max_attempts_per_tile` caps the retry loop.
     """
 
     def __init__(
         self,
         raster_dataset: RasterTileDataset,
         sampler: RandomTileSampler,
+        *,
+        skip_nan_tiles: bool = True,
+        max_attempts_per_tile: int = 50,
     ):
         super().__init__()
+        if max_attempts_per_tile < 1:
+            raise ValueError(f"max_attempts_per_tile must be >= 1, got {max_attempts_per_tile}")
         self.raster_dataset = raster_dataset
         self.sampler = sampler
+        self.skip_nan_tiles = skip_nan_tiles
+        self.max_attempts_per_tile = max_attempts_per_tile
 
     def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
-        for bbox in self.sampler:
-            yield self.raster_dataset.sample(bbox)
+        if not self.skip_nan_tiles:
+            for bbox in self.sampler:
+                yield self.raster_dataset.sample(bbox)
+            return
+
+        # NaN-rejection path: for each of the sampler's samples_per_epoch
+        # slots, call sampler.next_bbox() repeatedly until we find a
+        # NaN-free tile (or until we exhaust max_attempts_per_tile).
+        for _ in range(self.sampler.samples_per_epoch):
+            for _attempt in range(self.max_attempts_per_tile):
+                bbox = self.sampler.next_bbox()
+                features, labels = self.raster_dataset.sample(bbox)
+                if not torch.isnan(features).any():
+                    yield features, labels
+                    break
+            else:
+                raise RuntimeError(
+                    f"Could not find a NaN-free tile in "
+                    f"{self.max_attempts_per_tile} attempts. The dataset "
+                    f"likely has very large NaN regions; investigate the "
+                    f"source or raise max_attempts_per_tile."
+                )
