@@ -32,10 +32,18 @@ is no public "HEC-RAS-2D ImageNet."
    (`https://webapps.usgs.gov/infrm/estbfe/`). Per-watershed HEC-RAS
    submittals downloadable as zipped bundles via the interactive map
    UI. Standardized "RAS_Submittal" folder structure inside each
-   bundle. Has the strongest breadth of US coverage but **no documented
-   public REST API for bulk download** — the only documented access is
-   the interactive JS viewer, plus the underlying USGS ScienceBase
-   API which lists the datasets but requires per-watershed lookup.
+   bundle. Has the strongest breadth of US coverage but **no public
+   REST API for bulk download exists** (verified 2026-05-24 by
+   probing ScienceBase — `?q=InFRM+Base+Level+Engineering` returns 0
+   results — and reading FEMA / InFRM documentation). The InFRM home
+   page states "models and data ... are available upon request, at no
+   charge" — i.e., email-based access for bulk acquisition. The only
+   programmatic alternative is Selenium-driving the JS viewer
+   (fragile + ToS gray). Notably, even NOAA OWP's `ras2fim` pipeline
+   does NOT automate BLE ingestion: their docs require locally-
+   downloaded HEC-RAS models as input, then ingested via `RRASSLER`.
+   Whatever path we take, FEMA BLE acquisition is materially harder
+   than NOAA OWP S3.
 
 3. **FEMA Mapping Information Platform (MIP)**
    (`https://hazards.fema.gov`). Requires authenticated access via
@@ -94,12 +102,27 @@ inventory layer:**
 
 ### Phase 3B (concurrent or follow-on, weeks-months): FEMA BLE augmentation
 
-6. Probe estBFE Viewer's backend for any public ScienceBase / ArcGIS
-   REST endpoints that list and link BLE submittal bundles. (If none,
-   fall back to a documented Selenium-driving recipe that captures the
-   viewer's network requests.)
-7. Write a BLE-specific downloader (`src/hecras_mesh_ai/corpus/fema_ble.py`)
-   per discovered access mechanism.
+The "discovered REST endpoint" path is closed (2026-05-24 verification —
+see context above). Three realistic 3B sub-paths in increasing order
+of acquisition effort:
+
+  **3B-email** *(recommended)*: User emails the InFRM team requesting
+    bulk BLE access for non-commercial research. Per the InFRM home
+    page, this is the documented mechanism. Lowest-effort once a
+    response arrives; latency unknown but plausibly days to weeks.
+  **3B-scrape**: Build a Selenium harness around the estBFE Viewer.
+    Fragile (FEMA UI changes break it), ToS gray (federal site
+    automation isn't explicitly prohibited but isn't blessed). Avoid
+    unless 3B-email goes nowhere.
+  **3B-skip**: Treat NOAA OWP's S3 corpus as the BLE proxy — they
+    have already pulled curated BLE models into their set. Accept that
+    we don't get unfiltered BLE breadth. May be sufficient if Phase 3A
+    yields enough diversity.
+
+6. Try 3B-email first (parallel to Phase 3A development).
+7. If 3B-email yields bulk access: write `src/hecras_mesh_ai/corpus/fema_ble.py`
+   against whatever transport the InFRM team provides (likely a
+   shared file drop or a private URL list).
 8. Catalog with `hecstac`, dedupe against Phase 3A via spatial
    intersection.
 9. Retrain Stage 3 v1.
