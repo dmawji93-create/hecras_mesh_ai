@@ -9,5 +9,18 @@ Three layers, in commit order:
 """
 
 from hecras_mesh_ai.dataset.cache import CachedPaths, cache_pilot_project
+from hecras_mesh_ai.dataset.tile_dataset import (
+    BBox,
+    IterableTileDataset,
+    RandomTileSampler,
+    RasterTileDataset,
+)
 
-__all__ = ["CachedPaths", "cache_pilot_project"]
+__all__ = [
+    "BBox",
+    "CachedPaths",
+    "IterableTileDataset",
+    "RandomTileSampler",
+    "RasterTileDataset",
+    "cache_pilot_project",
+]
