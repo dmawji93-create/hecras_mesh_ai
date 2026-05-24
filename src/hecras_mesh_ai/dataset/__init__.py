@@ -9,6 +9,7 @@ Three layers, in commit order:
 """
 
 from hecras_mesh_ai.dataset.cache import CachedPaths, cache_pilot_project
+from hecras_mesh_ai.dataset.split import assert_no_spatial_overlap
 from hecras_mesh_ai.dataset.tile_dataset import (
     BBox,
     IterableTileDataset,
@@ -22,5 +23,6 @@ __all__ = [
     "IterableTileDataset",
     "RandomTileSampler",
     "RasterTileDataset",
+    "assert_no_spatial_overlap",
     "cache_pilot_project",
 ]
