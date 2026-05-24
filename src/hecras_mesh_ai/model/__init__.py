@@ -8,5 +8,11 @@
 """
 
 from hecras_mesh_ai.model.datamodule import BreaklinePilotDataModule
+from hecras_mesh_ai.model.loss import BCEDiceLoss, LossComponents, dice_loss
 
-__all__ = ["BreaklinePilotDataModule"]
+__all__ = [
+    "BCEDiceLoss",
+    "BreaklinePilotDataModule",
+    "LossComponents",
+    "dice_loss",
+]
