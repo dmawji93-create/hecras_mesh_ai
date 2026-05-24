@@ -1,9 +1,9 @@
 # Project Status — `hecras_mesh_ai`
 
 **As of:** 2026-05-23
-**Phase:** A.0 "make-one-work" sprint — Week 1 plumbing complete; **next: build-plan Stage 1**
+**Phase:** A.0 "make-one-work" sprint — **build-plan Stage 1 complete**; next: Stage 2 (Breakline Model Pilot)
 **Repo:** `C:\dev\hecras_mesh_ai\`
-**Branch:** `main` · 4 commits · no remote yet
+**Branch:** `main` · 20 commits · no remote yet
 
 ---
 
@@ -17,16 +17,37 @@ Automated 2D computational mesh generation for HEC-RAS using deep learning. Repl
 
 **Post-Week-1 reconciliation (2026-05-23).** Added `docs/build-plan/` (10 stages) as the executable source of truth alongside the strategic roadmap; added ADR 011 (quantitative mesh-quality objective) and ADR 012 (refinement loop is numerical-methods-first); amended ADR 003 to reframe expert meshes as a prior, not the training target; rewrote `CLAUDE.md` and `README.md`; added `.gitattributes` (LF normalization) and `.gitignore` entry for `.claude/`.
 
+**Build-plan Stage 1 — Feature & Label Pipeline (complete, 2026-05-23).** All six tasks landed across ~15 commits:
+
+| Task | Module | Tests |
+|---|---|---|
+| 1 — Bald Eagle exploration | `notebooks/02_baldeagle_explore.ipynb` | n/a |
+| 2 — DEM derivatives (slope + aspect_sincos + plan/profile curvature) | `src/hecras_mesh_ai/features/{slope,aspect,plan_curvature,profile_curvature}.py` | 31 (synthetic + closed-form) |
+| 3 — Feature stacker (CRS-aware, NaN-conditioning, row-direction runtime assertion) | `src/hecras_mesh_ai/features/{conditioning,stacker}.py` | 23 (synthetic + integration on both pilots) |
+| 4 — Breakline rasterizer | `src/hecras_mesh_ai/labels/breaklines.py` | 13 (synthetic + integration) |
+| 5 — Cache + RasterTileDataset + RandomTileSampler + IterableTileDataset + spatial-holdout | `src/hecras_mesh_ai/dataset/{cache,tile_dataset,split}.py` | 21 (synthetic + integration; full DataLoader path) |
+| 6 — Exit notebook | `notebooks/03_stage1_exit_features_and_labels.ipynb` | runs end-to-end on both pilots |
+
+**Stage 1 exit criteria — all met:**
+
+- [x] Every DEM-derivative function has passing unit tests — 31 in `tests/features/`.
+- [x] Feature channels confirmed aligned (CRS, resolution, extent) — programmatically (stacker integration tests against Muncie EPSG:2965 and Bald Eagle EPSG:2271) and visually (notebook 03 cells 8 + 9 + 16).
+- [x] Breakline label raster aligns pixel-for-pixel with the feature stack — cache round-trip test + notebook 03 visual overlays.
+- [x] Train/val tiles spatially separated with zero overlap — `assert_no_spatial_overlap` passes (different CRS, mathematically disjoint).
+- [x] Pipeline runs end-to-end on both Muncie and Bald Eagle — integration tests + notebook 03.
+- [x] `pytest` green; pre-commit clean — every commit ran the hook chain.
+
+**Train/val split decision:** train on Bald Eagle g09 (4 named breaklines: SayersDam, Lower, Middle, Upper); val on Muncie (Road 1, HighGround 1). Per-project cross-CRS spatial holdout. Rationale: more training-set prior signal, cleaner engineered-structure + topographic-feature coverage, val noise is acceptable for Stage 2's deliberately-overfit-pilot phase.
+
 | Component | Status |
 |---|---|
 | Repo skeleton (`src/`, `tests/`, `notebooks/`, `docs/`, `data/`, `scripts/`) | ✓ |
 | `pyproject.toml` (full ML stack declared, `dev`/`ml` optional extras) | ✓ |
 | `uv.lock` (reproducible env) | ✓ |
-| Pre-commit hooks (ruff + format + safety) | ✓ |
-| Smoke tests (`pytest`) | ✓ 2/2 passing |
-| Pilot data (Muncie + Bald Eagle in `data/raw/usace/RAS Samples/Example_Projects_7_0/2D Unsteady Flow Hydraulics/`) | ✓ |
-| `notebooks/01_muncie_explore.ipynb` (read + plot verified) | ✓ |
-| Build-plan + ADRs 011-012 + ADR 003 amendment | ✓ (2026-05-23) |
+| Pre-commit hooks (ruff + format + safety + 6 MB notebook limit) | ✓ active at git-hook level |
+| Pytest suite | ✓ ~75 tests; ~3 min including pilot integration |
+| Pilot data (Muncie + Bald Eagle in `data/raw/usace/RAS Samples/...`) | ✓ |
+| Stage 1 feature + label pipeline | ✓ complete |
 
 ## Current environment
 
@@ -78,15 +99,17 @@ GPU verified with a 4096×4096 matmul on `cuda:0` (~200 MB VRAM used).
 - **CRS embedding behavior characterized** (Stage 1 Task 1, 2026-05-23). Variable across HDFs; pipeline needs prefer-HDF-fall-back-terrain resolver. Both Muncie and 11/12 Bald Eagle geometries fall back to terrain; `g09` is the HDF-embedded case.
 - **`rashdf.refinement_regions()` empty-frame bug** — no longer surfaces under 0.12.0; returns `len() == 0` cleanly on all 12 Bald Eagle geometries and Muncie.
 
-## Next: Build-plan Stage 1 — Feature & Label Pipeline
+## Next: Build-plan Stage 2 — Breakline Model (Pilot)
 
-Detailed in `docs/build-plan/01-feature-and-label-pipeline.md`. Summary:
+Detailed in `docs/build-plan/02-breakline-model-pilot.md`. Summary:
 
-1. **Open Bald Eagle Dam Break with rashdf** — confirm CRS handling, pick the canonical `.gNN.hdf`, inventory breaklines/refinement regions/cells.
-2. **DEM-derivatives module** (`src/hecras_mesh_ai/features/`) — slope, aspect, plan/profile curvature, TWI, flow accumulation. Each a tested, typed function.
-3. **Feature stacking** into a CRS-aware multi-channel array (xarray + rioxarray); verify CRS, resolution, extent alignment across all channels.
-4. **Breakline rasterizer** — `breaklines` GeoDataFrame → binary label raster aligned to the DEM grid, configurable buffer width.
-5. **TorchGeo dataset + spatial-holdout split** — wrap Muncie + Bald Eagle for sampling with explicit spatial separation between train and val tiles.
-6. **Exploration notebook** visualizing every feature channel and the label raster overlaid on terrain.
+1. PyTorch Lightning `DataModule` wrapping the Stage 1 `IterableTileDataset`.
+2. `LightningModule` with a small `segmentation_models_pytorch` U-Net (ResNet-18/34 encoder, ImageNet init).
+3. BCE + Dice loss to handle the ~99/1 class imbalance the Stage 1 exit notebook confirmed.
+4. W&B logging from the first run.
+5. **Overfit sanity check** on a handful of tiles — loss must drive to near-zero. Validates the gradient path.
+6. Full pilot training run on Bald Eagle g09; val on Muncie.
+7. Post-processing chain: probability threshold → skeletonize → vectorize → simplify → smooth → polylines.
+8. Buffer-based IoU / F1 against expert breaklines.
 
-Stage 1 exit criteria (must all pass before Stage 2): every DEM-derivative has passing unit tests; feature channels aligned (CRS / resolution / extent) verified visually and programmatically; breakline label raster pixel-aligned with feature stack; train/val tiles spatially separated with zero overlap (leakage check); pipeline runs end-to-end on both pilots; `pytest` green; pre-commit clean.
+Stage 2 exit criteria: overfit-loss collapses, full pilot run completes + logs to W&B, end-to-end terrain → polyline path works, IoU/F1 computed against expert, visualized overlays, pytest + pre-commit clean. Overfit on the pilot is expected and is the point — Stage 3 is where generalization gets attacked.
