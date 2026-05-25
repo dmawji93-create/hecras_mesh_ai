@@ -179,68 +179,76 @@ def run_plan_com(
 
         hec.Project_Open(str(project_prj))
 
-        # Find the plan file matching `plan_id`. HEC-RAS exposes the
-        # list of plan filenames via Plan_Names; we match by the .pNN
-        # suffix in the filename.
-        plan_target = f".p{plan_id}"
-        # Plan_Names returns (count, names_array) — older versions vary
-        # in arg shape. Use late binding tolerantly.
+        # Plan_Names(PlanCount, PlanNames, OnlyBaseDir) — pywin32 late
+        # binding turns output params into extra return values. Returns
+        # [count, (titles_tuple), only_base_dir_echo].
         try:
-            _count, plan_names = hec.Plan_Names(0, None, False)
-        except Exception:  # noqa: BLE001
-            # Some versions return just a list.
-            plan_names = list(hec.Plan_Names())
+            _count, plan_titles, _ = hec.Plan_Names(0, None, False)
+        except Exception as e:  # noqa: BLE001
+            hec.QuitRas()
+            return RunResult(
+                success=False,
+                backend="com",
+                results_hdf=None,
+                duration_seconds=time.monotonic() - start,
+                error=f"Plan_Names call failed: {e}",
+            )
 
-        # plan_names may be a tuple/list of plan display names. We need
-        # the file-suffix mapping; HEC-RAS exposes Plan_Information /
-        # PlanFile if needed, but the simplest path is to set the plan
-        # by file path via CurrentPlanFile (when supported).
-        matched_name: str | None = None
-        for nm in plan_names:
-            # Best effort: plan display names usually contain the .pNN
-            # number in PlanInformationValue, but we don't have that
-            # mapping handy. Fall back to filename probing below.
-            if plan_target in str(nm):
-                matched_name = str(nm)
+        # Map plan display titles to their .pNN file paths via
+        # Plan_GetFilename, find the one ending in .p<plan_id>.
+        target_suffix = f".p{plan_id}".lower()
+        matched_title: str | None = None
+        title_to_filename: dict[str, str] = {}
+        for title in plan_titles:
+            try:
+                raw = hec.Plan_GetFilename(title)
+            except Exception:  # noqa: BLE001
+                continue
+            # pywin32 returns a tuple (filepath, echoed_title) for COM
+            # methods with output params; some versions return just the
+            # filepath string. Normalize.
+            fname = str(raw[0]) if isinstance(raw, tuple) else str(raw)
+            title_to_filename[title] = fname
+            if fname.lower().endswith(target_suffix):
+                matched_title = title
                 break
 
-        if matched_name is not None:
-            hec.Plan_SetCurrent(matched_name)
-        else:
-            # Try the file-based setter (HEC-RAS 6.x+).
-            plan_path = project_prj.with_suffix(f".p{plan_id}")
-            try:
-                hec.CurrentPlanFile = str(plan_path)
-            except Exception as e:  # noqa: BLE001
-                hec.QuitRas()
-                return RunResult(
-                    success=False,
-                    backend="com",
-                    results_hdf=None,
-                    duration_seconds=time.monotonic() - start,
-                    error=(
-                        f"could not select plan {plan_id!r}: "
-                        f"not in Plan_Names ({plan_names!r}) and "
-                        f"CurrentPlanFile set failed: {e}"
-                    ),
-                )
+        if matched_title is None:
+            hec.QuitRas()
+            return RunResult(
+                success=False,
+                backend="com",
+                results_hdf=None,
+                duration_seconds=time.monotonic() - start,
+                error=(
+                    f"no plan with filename suffix {target_suffix!r}; "
+                    f"available: {title_to_filename!r}"
+                ),
+            )
 
-        # Compute. Signature has varied across versions; try the common
-        # ones in order.
-        compute_ok = False
-        compute_err: str = ""
+        hec.Plan_SetCurrent(matched_title)
+
+        # Compute_CurrentPlan(NMsg, Messages, Blocking). pywin32 returns
+        # the function result; output params become extra return values.
         try:
-            # 6.x signature: Compute_CurrentPlan(NMsg, Messages, Blocking)
-            result = hec.Compute_CurrentPlan(0, None, True)
-            compute_ok = bool(result)
+            ret = hec.Compute_CurrentPlan(0, None, True)
         except Exception as e:  # noqa: BLE001
-            compute_err = str(e)
-            try:
-                # Some versions: no args.
-                hec.Compute_CurrentPlan()
-                compute_ok = True
-            except Exception as e2:  # noqa: BLE001
-                compute_err = f"{compute_err}; fallback: {e2}"
+            hec.QuitRas()
+            return RunResult(
+                success=False,
+                backend="com",
+                results_hdf=None,
+                duration_seconds=time.monotonic() - start,
+                error=f"Compute_CurrentPlan raised: {e}",
+            )
+
+        # `ret` may be a bool or a tuple of (bool, NMsg, Messages).
+        if isinstance(ret, tuple):
+            compute_ok = bool(ret[0])
+            compute_err = f"messages={ret[2]!r}" if len(ret) >= 3 else ""
+        else:
+            compute_ok = bool(ret)
+            compute_err = ""
 
         hec.QuitRas()
 
