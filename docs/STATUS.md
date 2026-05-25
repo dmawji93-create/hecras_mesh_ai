@@ -1,9 +1,9 @@
 # Project Status — `hecras_mesh_ai`
 
-**As of:** 2026-05-23
-**Phase:** A.0 "make-one-work" sprint — **build-plan Stages 1+2 complete**; next: Stage 3 (Breakline Model Scale — bulk FEMA corpus)
+**As of:** 2026-05-25
+**Phase:** A.0 "make-one-work" sprint — **build-plan Stages 1, 2, and 4 complete**. Stage 3 (bulk-corpus harvesting) is **blocked on pending NOAA ESIP credentials** (email sent 2026-05-24). Next when unblocked / next here: **Stage 5 — wire the Stage 2 model output through the Stage 4 harness to close the breakline → simulation → score loop.**
 **Repo:** `C:\dev\hecras_mesh_ai\`
-**Branch:** `main` · 36 commits · no remote yet
+**Branch:** `main` · 42 commits · no remote yet
 
 ---
 
@@ -45,9 +45,11 @@ Automated 2D computational mesh generation for HEC-RAS using deep learning. Repl
 | `pyproject.toml` (full ML stack declared, `dev`/`ml` optional extras) | ✓ |
 | `uv.lock` (reproducible env) | ✓ |
 | Pre-commit hooks (ruff + format + safety + 6 MB notebook limit) | ✓ active at git-hook level |
-| Pytest suite | ✓ ~75 tests; ~3 min including pilot integration |
+| Pytest suite | ✓ 206 tests; ~3 s for the fast suite, +30 s for the gated HEC-RAS integration test |
 | Pilot data (Muncie + Bald Eagle in `data/raw/usace/RAS Samples/...`) | ✓ |
 | Stage 1 feature + label pipeline | ✓ complete |
+| Stage 2 breakline-detection U-Net pilot | ✓ complete |
+| Stage 4 HEC-RAS engineering harness (writer + launcher + parser) | ✓ complete end-to-end against HEC-RAS 7.0 |
 
 ## Current environment
 
@@ -82,10 +84,12 @@ GPU verified with a 4096×4096 matmul on `cuda:0` (~200 MB VRAM used).
 
 ## Decisions on record (ADRs in `docs/decisions/`)
 
-001 Staged A → B → C delivery · 002 Mixed/general scope · 003 Supervised pretrain + performance fine-tune **(amended 2026-05-23 — expert meshes are a prior, not the target)** · 004 Hybrid FEMA + curated corpus · 005 Tech stack (PyTorch + Lightning + smp + TorchGeo) · 006 Pilot dataset (HEC-RAS official examples) · 007 Make-one-work sprint · 008 Claude Code in VS Code as system of record · 009 Notebooks for exploration, modules for keepers · 010 CUDA 12.8 via PyTorch index (RTX 3090), OneDrive operational notes · **011 Quantitative mesh-quality objective** · **012 Refinement loop is numerical-methods-first; ML is an optional optimization layer**.
+001 Staged A → B → C delivery · 002 Mixed/general scope · 003 Supervised pretrain + performance fine-tune **(amended 2026-05-23 — expert meshes are a prior, not the target)** · 004 Hybrid FEMA + curated corpus · 005 Tech stack (PyTorch + Lightning + smp + TorchGeo) · 006 Pilot dataset (HEC-RAS official examples) · 007 Make-one-work sprint · 008 Claude Code in VS Code as system of record · 009 Notebooks for exploration, modules for keepers · 010 CUDA 12.8 via PyTorch index (RTX 3090), OneDrive operational notes · **011 Quantitative mesh-quality objective** · **012 Refinement loop is numerical-methods-first; ML is an optional optimization layer** · **013 Bulk corpus access strategy (NOAA OWP primary, FEMA BLE secondary, MIP deferred)**.
 
 ## Known open items
 
+- **NOAA ESIP credentials request in flight** (sent 2026-05-24 from gmail to Carson Pruitt + Fernando Salas). Stage 3 (bulk-corpus harvesting via `s3://noaa-nws-owp-fim/ras2fim`) cannot start until creds arrive. Latency: days to weeks.
+- **HEC-RAS CLI is undocumented for 7.0.** The launcher's CLI fallback runs `Ras.exe -c <prj> p<NN>` which exits 0 but doesn't actually compute. COM is the working primary; CLI fallback is degenerate. Not blocking — COM works — but a real CLI path would simplify batch contexts.
 - **Project folder name has spaces** in the data path (`…/RAS Samples/Example_Projects_7_0/2D Unsteady Flow Hydraulics/…`). Working fine for `rashdf` and `rasterio`; flag if a CLI tool ever mishandles it.
 - **No git remote yet.** Repo is local-only; cloud backup via private GitHub remote is planned but not done.
 
@@ -126,6 +130,35 @@ Honest read: the model learned Bald Eagle's specific breakline morphology (~80% 
 2. **Random sampling can't learn rare-positive classes** — at ~0.005% positive rate, BCE alone converges to "predict 0 everywhere." Fixed via positive-CENTERED sampling (`RasterTileDataset.positive_pixel_rowcol` + `RandomTileSampler.next_positive_centered_bbox`), gated by `positive_fraction`.
 3. **Checkpoint monitor=val/total_loss selected a degenerate "predict zero" model** — val loss is dominated by trivial empty-tile success, so "best by val" picked the most-zero-predicting epoch. Fixed by monitoring `train/total_loss_epoch` and adding `save_last=True`. Saved checkpoint after first training run was loadable but predicted nothing on any input; second training run with the fix produced the real results above.
 
-## Next: Build-plan Stage 3 — Breakline Model at Scale
+**Build-plan Stage 3 — Bulk corpus access strategy decided (2026-05-24).** Detailed in `docs/build-plan/03-breakline-model-scale.md` and **ADR 013**:
 
-Detailed in `docs/build-plan/03-breakline-model-scale.md`. The bulk FEMA NFHL/MIP corpus acquisition + integration + quality-filtered training. This is where the real generalization story begins.
+- **Phase 3A — NOAA OWP S3** (`s3://noaa-nws-owp-fim/ras2fim`). Primary. Bulk HEC-RAS models with terrain, geometry, and (in most cases) breaklines. Requires ESIP credentials. **Status: email sent 2026-05-24, awaiting reply.**
+- **Phase 3B — FEMA BLE / InFRM corpus.** Secondary. Different access path (probably an InFRM-team request). Engaged only if 3A produces insufficient diversity.
+- **Phase 3C — FEMA MIP corpus.** Deferred. Discovery probes confirmed no public REST endpoint; estBFE backend doesn't expose downloads; ScienceBase has no InFRM BLE collection; even NOAA OWP's `ras2fim` requires locally-downloaded models.
+
+When NOAA credentials arrive: pause Stage 5 (if active) and build `src/hecras_mesh_ai/corpus/noaa_owp.py` — an `aws s3 sync` wrapper plus a `hecstac` STAC catalog inventory.
+
+**Build-plan Stage 4 — HEC-RAS engineering harness (complete, 2026-05-25).** Built in parallel with the Stage 3 wait. All four tasks landed across 6 commits; full closed loop now works end-to-end against HEC-RAS 7.0:
+
+| Task | Module | Tests |
+|---|---|---|
+| 1 — HDF inspector + schema notes | `src/hecras_mesh_ai/harness/inspect.py`, `docs/hdf-schema/` | 6 |
+| 2 — Breakline-replacement writer | `src/hecras_mesh_ai/harness/write_geom.py` | 14 (incl. bit-for-bit round-trip on real Muncie HDF) |
+| 3 — Plan launcher (COM primary, CLI fallback) | `src/hecras_mesh_ai/harness/launch.py` | 17 (16 unit + 1 slow integration via live HEC-RAS) |
+| 4 — 2D unsteady results parser | `src/hecras_mesh_ai/harness/results.py` | 10 (incl. integration on real Muncie p04.hdf) |
+
+**Stage 4 verification end-to-end:**
+
+- `scripts/verify_writer_muncie.py` produces a HEC-RAS-openable round-trip copy of the Muncie project. Manually verified to open cleanly in HEC-RAS 7.0 with both breaklines (`Road 1`, `HighGround 1`) rendering identically to the pristine sample.
+- `pytest -m slow tests/harness/test_launch.py` actually launches HEC-RAS via COM, computes Muncie's plan p04, and produces a 19 MB results HDF — all in ~30 seconds. Mesh regenerated (5765 cells vs 5391 input cells), all derived data populated.
+- `max_water_surface()`, `max_depth()`, `max_face_velocity()` all parse the real results HDF, with active-cell masking (HEC-RAS appends ~374 ghost cells past the active mesh — caught by integration test, masked via `Cells Minimum Elevation == NaN`).
+
+**The closed loop now works:** a single Python call sequence — `replace_breaklines()` → `run_plan()` → `max_water_surface()` — produces a quantitative simulation readout with no human in the loop. This is exactly the engineering substrate Stage 5 wires the ML model output through.
+
+**New dependency:** `pywin32>=306` added under a Windows-only `harness` optional extra (`uv sync --extra harness`).
+
+## Next: Build-plan Stage 5 — ML × Harness wiring
+
+The natural next milestone. Take the Stage 2 model's predicted breakline polylines (from `probability_to_polylines`), pump them into `replace_breaklines()` → `run_plan()` → `max_water_surface()`, and close the full ML-to-simulation-to-score loop on a known plan. All pieces exist; this is glue + an end-to-end integration test.
+
+(If NOAA credentials arrive before Stage 5 completes, pause Stage 5 and execute Phase 3A NOAA OWP downloader first — the bulk corpus unlocks the real generalization story.)
