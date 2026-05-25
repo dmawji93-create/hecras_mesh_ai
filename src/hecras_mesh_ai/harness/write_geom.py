@@ -225,13 +225,16 @@ def replace_breaklines(
     target = Path(target_hdf_path)
     if not source.exists():
         raise FileNotFoundError(f"source HDF does not exist: {source}")
-    if target.exists() and not overwrite:
+    in_place = source.resolve() == target.resolve()
+    if target.exists() and not overwrite and not in_place:
         raise FileExistsError(f"target HDF exists: {target} (pass overwrite=True to replace)")
-    if target.exists():
-        target.unlink()
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    shutil.copy2(source, target)
+    # Skip the copy when source and target are the same file — patch in place.
+    if not in_place:
+        if target.exists():
+            target.unlink()
+        shutil.copy2(source, target)
 
     packed = _pack(breaklines)
     with h5py.File(target, "r+") as f:

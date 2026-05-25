@@ -163,6 +163,18 @@ def test_replace_breaklines_refuses_to_overwrite_existing_target(tmp_path):
         replace_breaklines(src, tgt, [])
 
 
+def test_replace_breaklines_in_place_patches_without_copy_error(tmp_path):
+    """source==target should patch the file in place, not error on copy."""
+    src = _make_minimal_source_hdf(tmp_path)
+    bls = [Breakline(name="InPlace", points=np.array([[0.0, 0.0], [1.0, 1.0]]))]
+    out = replace_breaklines(src, src, bls)
+    assert out == src
+    with h5py.File(src, "r") as f:
+        assert f[BREAKLINES_PATH]["Attributes"][0]["Name"] == b"InPlace"
+        # Preserved-marker sentinel must survive in-place patching.
+        np.testing.assert_array_equal(f["/Geometry/2D Flow Areas/Preserved Marker"][:], [1, 2, 3])
+
+
 def test_replace_breaklines_overwrites_when_flag_set(tmp_path):
     src = _make_minimal_source_hdf(tmp_path)
     tgt = tmp_path / "out.g01.hdf"
