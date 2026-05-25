@@ -3,7 +3,7 @@
 **As of:** 2026-05-25
 **Phase:** A.0 "make-one-work" sprint — **build-plan Stages 1, 2, and 4 complete**. Stage 3 (bulk-corpus harvesting) is **blocked on pending NOAA ESIP credentials** (email sent 2026-05-24). Next when unblocked / next here: **Stage 5 — wire the Stage 2 model output through the Stage 4 harness to close the breakline → simulation → score loop.**
 **Repo:** `C:\dev\hecras_mesh_ai\`
-**Branch:** `main` · 42 commits · no remote yet
+**Branch:** `main` · 44 commits · remote: `github.com/dmawji93-create/hecras_mesh_ai` (private)
 
 ---
 
@@ -91,7 +91,6 @@ GPU verified with a 4096×4096 matmul on `cuda:0` (~200 MB VRAM used).
 - **NOAA ESIP credentials request in flight** (sent 2026-05-24 from gmail to Carson Pruitt + Fernando Salas). Stage 3 (bulk-corpus harvesting via `s3://noaa-nws-owp-fim/ras2fim`) cannot start until creds arrive. Latency: days to weeks.
 - **HEC-RAS CLI is undocumented for 7.0.** The launcher's CLI fallback runs `Ras.exe -c <prj> p<NN>` which exits 0 but doesn't actually compute. COM is the working primary; CLI fallback is degenerate. Not blocking — COM works — but a real CLI path would simplify batch contexts.
 - **Project folder name has spaces** in the data path (`…/RAS Samples/Example_Projects_7_0/2D Unsteady Flow Hydraulics/…`). Working fine for `rashdf` and `rasterio`; flag if a CLI tool ever mishandles it.
-- **No git remote yet.** Repo is local-only; cloud backup via private GitHub remote is planned but not done.
 
 ## Assumptions to verify at test time
 
