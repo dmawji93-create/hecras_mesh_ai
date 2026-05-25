@@ -24,6 +24,12 @@ dev = [
     "ruff>=0.5",
     "pre-commit>=3.7",
 ]
+harness = [
+    # COM access to HECRASController for programmatic HEC-RAS control.
+    # Windows-only; segregated from `ml` so non-Windows dev environments
+    # don't try to install pywin32. See src/hecras_mesh_ai/harness/launch.py.
+    "pywin32>=306; sys_platform == 'win32'",
+]
 ml = [
     # Core ML
     "torch>=2.2",
@@ -76,3 +82,6 @@ per-file-ignores = { "__init__.py" = ["F401"] }
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+markers = [
+    "slow: opt-in tests that exercise external systems (e.g., launching HEC-RAS)",
+]
