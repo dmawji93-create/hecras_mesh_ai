@@ -2,7 +2,7 @@
 
 Automated 2D computational mesh generation for HEC-RAS using deep learning. Replaces the slow, iterative, intuition-bound manual workflow of breakline placement, refinement region selection, and resolution tuning with a learned system that proposes meshes from terrain and ancillary data — and then refines them against a measurable quantitative objective.
 
-Owner: Dante Mawji. License: Proprietary.
+Owner: Dante Mawji. License: MIT.
 
 ## Current status
 

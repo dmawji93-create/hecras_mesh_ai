@@ -9,7 +9,7 @@ description = "AI-assisted HEC-RAS 2D mesh generation"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 authors = [{ name = "Dante Mawji" }]
-license = { text = "Proprietary" }
+license = { text = "MIT" }
 
 # Full ML / geospatial stack per ADR 005. Declared here so the
 # dependency surface is visible in one place. Installation of the

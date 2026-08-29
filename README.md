@@ -39,4 +39,4 @@ See [`CLAUDE.md`](CLAUDE.md) for working conventions and [`docs/decisions/`](doc
 
 ## License
 
-Proprietary.
+MIT — see [`LICENSE`](LICENSE).
