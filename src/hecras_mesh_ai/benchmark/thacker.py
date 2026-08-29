@@ -25,9 +25,41 @@ and c. The solution is:
 where w = sqrt(2*g*D0) / a and p0 = 2*A*D0/a parameterizes the
 initial tilt amplitude.
 
-c0 is determined by volume conservation: the total water volume must
-equal the still-water volume pi*D0*a^2/2 at all times. Computed
-numerically at initialization.
+c0 has a closed form. Requiring the total volume to equal the still-water
+volume pi*D0*a^2/2 forces the wetted region to be a disk of radius
+exactly `a`, translating rigidly with center x_c(t) = A*a*cos(wt), and
+
+    c0 = -A^2 * D0.
+
+(Completing the square in h = eta - z_b shows the wet region is always a
+disk of radius R with R^2 = a^2*(c0 + D0)/D0 + a^2*A^2; volume
+pi*D0*R^4/(2*a^2) equals the still-water volume iff R = a.)
+Consequently the shoreline on the x-axis is exactly x_c(t) +/- a, and the
+maximum shoreline excursion is (1 + A)*a — NOT the rim radius `a`. Any
+raster meant to contain the benchmark must extend at least (1+A)*a from
+the bowl center; `ThackerBowl.recommended_raster_extent` provides this
+with margin.
+
+HEC-RAS comparison protocol (IMPORTANT — read before using this as a
+Stage 6 reference):
+
+    The exact solution is FRICTIONLESS with full momentum. HEC-RAS
+    cannot reproduce it exactly, so comparisons must follow a protocol:
+    - Equation set: full Shallow Water Equations (SWE-ELM or SWE-EM).
+      The default Diffusion Wave set has no local acceleration term and
+      cannot slosh at all — the water simply settles. DWE runs of this
+      benchmark are meaningless.
+    - Manning's n: HEC-RAS requires n > 0. Use the smallest n the run
+      tolerates (n = 0.001 is ~100x milder than n = 0.01 and viable for
+      the first period away from the wet/dry fringe). Friction damping
+      grows near the fringe where S_f ~ h^(-4/3) diverges.
+    - Comparison window: the first oscillation period only. Expect and
+      quantify amplitude decay from friction; do not attribute it to
+      mesh error. The benchmark validates the ERROR-METRIC framework
+      (does the computed error ordering behave as expected under grid
+      refinement?), not HEC-RAS-vs-analytic agreement in the absolute.
+    - Initial condition: t=0 is maximum tilt with u = 0 everywhere,
+      matching HEC-RAS's zero-velocity WSE-raster initial condition.
 
 Coordinate convention:
     - Origin (0, 0) at the center of the bowl (deepest point).
@@ -44,13 +76,13 @@ Bed profile:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 import rasterio
 from rasterio.crs import CRS
-from rasterio.transform import from_bounds
+from rasterio.transform import from_origin
 
 G_FTPS2 = 32.174  # gravitational acceleration, ft/s^2
 
@@ -69,6 +101,8 @@ class ThackerBowl:
     A
         Oscillation amplitude parameter, dimensionless, 0 < A < 1.
         Larger = more violent sloshing; A = 0 is the still-water case.
+        The surface tilt across the bowl is 2*A*D0 and the shoreline
+        swings +/- A*a about the rim.
     g
         Gravitational acceleration [ft/s^2]. Default 32.174.
     """
@@ -78,9 +112,9 @@ class ThackerBowl:
     A: float
     g: float = G_FTPS2
 
-    # Computed at init: c0 (mean-level constant for volume conservation)
-    _p0: float = 0.0
-    _c0: float = 0.0
+    # Derived constants, set in __post_init__ (not constructor arguments).
+    _p0: float = field(init=False, repr=False, default=0.0)
+    _c0: float = field(init=False, repr=False, default=0.0)
 
     def __post_init__(self) -> None:
         if self.D0 <= 0:
@@ -91,29 +125,9 @@ class ThackerBowl:
             raise ValueError(f"A must be in (0, 1); got {self.A}")
         # p0 parameterizes the initial surface tilt.
         object.__setattr__(self, "_p0", 2.0 * self.A * self.D0 / self.a)
-        # c0 is determined by volume conservation at t=0.
-        object.__setattr__(self, "_c0", self._solve_c0())
-
-    def _solve_c0(self) -> float:
-        """Find c(0) so that the initial volume matches still-water volume."""
-        from scipy.optimize import brentq
-
-        v_target = np.pi * self.D0 * self.a**2 / 2.0
-
-        def _volume_error(c0: float) -> float:
-            n = 800
-            extent = self.a * 1.5
-            xs = np.linspace(-extent, extent, n)
-            ys = np.linspace(-extent, extent, n)
-            dx = xs[1] - xs[0]
-            dy = ys[1] - ys[0]
-            X, Y = np.meshgrid(xs, ys, indexing="ij")
-            z_b = self.D0 * ((X**2 + Y**2) / self.a**2 - 1.0)
-            eta = c0 + self._p0 * X
-            h = np.maximum(eta - z_b, 0.0)
-            return float(np.sum(h) * dx * dy) - v_target
-
-        return float(brentq(_volume_error, -self.D0, self.D0, xtol=1e-10))
+        # Volume conservation forces the wet disk radius to equal `a`,
+        # which gives c0 in closed form (see module docstring).
+        object.__setattr__(self, "_c0", -(self.A**2) * self.D0)
 
     @property
     def omega(self) -> float:
@@ -125,6 +139,20 @@ class ThackerBowl:
         """Oscillation period [s]."""
         return 2 * np.pi / self.omega
 
+    @property
+    def max_shoreline_extent(self) -> float:
+        """Maximum distance the shoreline reaches from the bowl center [ft].
+
+        The wet disk of radius `a` translates with center A*a*cos(wt),
+        so the shoreline reaches (1 + A)*a at the extremes.
+        """
+        return (1.0 + self.A) * self.a
+
+    @property
+    def recommended_raster_extent(self) -> float:
+        """Half-width for terrain/IC rasters: shoreline excursion + 10% margin."""
+        return self.max_shoreline_extent * 1.1
+
     def _c(self, t: float) -> float:
         """Mean-level adjustment c(t) from the ODE solution."""
         return self._c0 + self.a**2 * self._p0**2 * np.sin(self.omega * t) ** 2 / (4.0 * self.D0)
@@ -132,6 +160,13 @@ class ThackerBowl:
     def _p(self, t: float) -> float:
         """Surface tilt p(t) = p0 * cos(wt)."""
         return self._p0 * np.cos(self.omega * t)
+
+    def shoreline_center_x(self, t: float) -> float:
+        """x-coordinate of the wet disk's center at time t [ft].
+
+        x_c(t) = a^2 * p(t) / (2*D0) = A * a * cos(wt).
+        """
+        return self.A * self.a * np.cos(self.omega * t)
 
     def bed_elevation(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         """Bed (bottom) elevation at positions (x, y).
@@ -172,7 +207,8 @@ class ThackerBowl:
         """Exact x-velocity at time t [ft/s].
 
         Spatially uniform (!) — the entire water body moves as a rigid
-        mass. Derived from the ODE: u = a^2 * p'(t) / (2*D0).
+        mass. Derived from the ODE: u = a^2 * p'(t) / (2*D0), which
+        equals -A * a * w * sin(wt).
         """
         return -(self.a**2) * self._p0 * self.omega * np.sin(self.omega * t) / (2.0 * self.D0)
 
@@ -183,22 +219,22 @@ class ThackerBowl:
     def shoreline_x_extent(self, t: float) -> tuple[float, float]:
         """x-coordinates of the shoreline on the x-axis (y=0) at time t.
 
-        Returns (x_min, x_max) of the wetted region along y=0.
+        Closed form: the wet region is a disk of radius exactly `a`
+        centered at x_c(t) = A*a*cos(wt), so the shoreline on y=0 is
+        (x_c - a, x_c + a).
         """
-        xs = np.linspace(-self.a * 1.5, self.a * 1.5, 10000)
-        h = self.depth(xs, np.zeros_like(xs), t)
-        wet = h > 0
-        if not wet.any():
-            return (0.0, 0.0)
-        wet_xs = xs[wet]
-        return (float(wet_xs.min()), float(wet_xs.max()))
+        x_c = self.shoreline_center_x(t)
+        return (x_c - self.a, x_c + self.a)
 
     def volume(self, t: float, *, n_points: int = 2000) -> float:
         """Numerically integrate the exact depth field to get total volume.
 
-        Used for testing: volume must be constant across all times.
+        Used for testing: volume must equal the still-water volume
+        pi*D0*a^2/2 at all times. The integration window covers the full
+        shoreline excursion (1+A)*a — a window clipped short of that
+        silently underestimates the volume.
         """
-        extent = self.a * 1.5
+        extent = self.max_shoreline_extent * 1.02
         xs = np.linspace(-extent, extent, n_points)
         ys = np.linspace(-extent, extent, n_points)
         dx = xs[1] - xs[0]
@@ -219,6 +255,62 @@ class ThackerBowl:
         return np.where(wet, eta, z_b)
 
 
+def _make_grid(
+    bowl: ThackerBowl,
+    resolution: float,
+    origin_x: float,
+    origin_y: float,
+) -> tuple[object, np.ndarray, np.ndarray, int, int]:
+    """Build an exactly-registered sampling grid covering the benchmark.
+
+    The half-width starts from `bowl.recommended_raster_extent` (full
+    shoreline excursion + margin) and is rounded UP to a whole number of
+    cells, then bounds are derived from the cell count so the pixel size
+    is exactly `resolution`. Sample coordinates are pixel centers and
+    match the geotransform exactly for any resolution — including ones
+    that do not divide the nominal extent (the old code drifted up to
+    ~0.7 cell at the far edge in that case).
+
+    Returns (transform, local_x, local_y, n_rows, n_cols) where local_*
+    are pixel-center coordinates relative to the bowl center.
+    """
+    half_cells = int(np.ceil(bowl.recommended_raster_extent / resolution))
+    n_cols = n_rows = 2 * half_cells
+    west = origin_x - half_cells * resolution
+    north = origin_y + half_cells * resolution
+    transform = from_origin(west, north, resolution, resolution)
+
+    cols = np.arange(n_cols)
+    rows = np.arange(n_rows)
+    col_grid, row_grid = np.meshgrid(cols, rows)
+    xs = west + (col_grid + 0.5) * resolution
+    ys = north - (row_grid + 0.5) * resolution
+    return transform, xs - origin_x, ys - origin_y, n_rows, n_cols
+
+
+def _write_geotiff(
+    data: np.ndarray,
+    out_path: Path,
+    transform: object,
+    crs: CRS | str,
+) -> Path:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with rasterio.open(
+        out_path,
+        "w",
+        driver="GTiff",
+        height=data.shape[0],
+        width=data.shape[1],
+        count=1,
+        dtype="float32",
+        crs=CRS.from_string(crs) if isinstance(crs, str) else crs,
+        transform=transform,
+        compress="deflate",
+    ) as dst:
+        dst.write(data, 1)
+    return out_path
+
+
 def generate_thacker_terrain(
     bowl: ThackerBowl,
     out_path: Path | str,
@@ -230,9 +322,11 @@ def generate_thacker_terrain(
 ) -> Path:
     """Write the Thacker bowl bed elevation as a GeoTIFF.
 
-    The raster is centered at (origin_x, origin_y) in the given CRS,
-    extending ±1.3a in both directions (enough margin beyond the rim
-    for HEC-RAS to place boundary cells).
+    The raster is centered at (origin_x, origin_y) in the given CRS and
+    extends past the full shoreline excursion (1+A)*a with a 10% margin
+    (`bowl.recommended_raster_extent`), so the oscillating wet region is
+    contained at every instant. Note this is substantially wider than
+    the rim radius `a` — the water travels A*a beyond the rim.
 
     Parameters
     ----------
@@ -241,7 +335,9 @@ def generate_thacker_terrain(
     out_path
         Output GeoTIFF path.
     resolution
-        Cell size in CRS linear units (ft for EPSG:2965).
+        Cell size in CRS linear units (ft for EPSG:2965). The written
+        pixel size is exactly this value; the covered extent rounds up
+        to a whole number of cells.
     crs
         Coordinate reference system. Default EPSG:2965 (Indiana East
         ftUS) to match Muncie for consistency.
@@ -254,41 +350,9 @@ def generate_thacker_terrain(
     Path to the written GeoTIFF.
     """
     out_path = Path(out_path)
-    extent = bowl.a * 1.3
-    west = origin_x - extent
-    east = origin_x + extent
-    south = origin_y - extent
-    north = origin_y + extent
-
-    n_cols = int(np.ceil(2 * extent / resolution))
-    n_rows = n_cols
-    transform = from_bounds(west, south, east, north, n_cols, n_rows)
-
-    cols = np.arange(n_cols)
-    rows = np.arange(n_rows)
-    col_grid, row_grid = np.meshgrid(cols, rows)
-    xs = west + (col_grid + 0.5) * resolution
-    ys = north - (row_grid + 0.5) * resolution
-    local_x = xs - origin_x
-    local_y = ys - origin_y
+    transform, local_x, local_y, _, _ = _make_grid(bowl, resolution, origin_x, origin_y)
     z = bowl.bed_elevation(local_x, local_y).astype(np.float32)
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(
-        out_path,
-        "w",
-        driver="GTiff",
-        height=n_rows,
-        width=n_cols,
-        count=1,
-        dtype="float32",
-        crs=CRS.from_string(crs) if isinstance(crs, str) else crs,
-        transform=transform,
-        compress="deflate",
-    ) as dst:
-        dst.write(z, 1)
-
-    return out_path
+    return _write_geotiff(z, out_path, transform, crs)
 
 
 def generate_initial_wse_raster(
@@ -300,40 +364,12 @@ def generate_initial_wse_raster(
     origin_x: float = 500_000.0,
     origin_y: float = 1_800_000.0,
 ) -> Path:
-    """Write the t=0 water-surface elevation as a GeoTIFF for HEC-RAS IC."""
+    """Write the t=0 water-surface elevation as a GeoTIFF for HEC-RAS IC.
+
+    Same grid, extent, and registration guarantees as
+    `generate_thacker_terrain` — the wet region is fully contained.
+    """
     out_path = Path(out_path)
-    extent = bowl.a * 1.3
-    west = origin_x - extent
-    east = origin_x + extent
-    south = origin_y - extent
-    north = origin_y + extent
-
-    n_cols = int(np.ceil(2 * extent / resolution))
-    n_rows = n_cols
-    transform = from_bounds(west, south, east, north, n_cols, n_rows)
-
-    cols = np.arange(n_cols)
-    rows = np.arange(n_rows)
-    col_grid, row_grid = np.meshgrid(cols, rows)
-    xs = west + (col_grid + 0.5) * resolution
-    ys = north - (row_grid + 0.5) * resolution
-    local_x = xs - origin_x
-    local_y = ys - origin_y
+    transform, local_x, local_y, _, _ = _make_grid(bowl, resolution, origin_x, origin_y)
     wse = bowl.initial_wse_raster(local_x, local_y).astype(np.float32)
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(
-        out_path,
-        "w",
-        driver="GTiff",
-        height=n_rows,
-        width=n_cols,
-        count=1,
-        dtype="float32",
-        crs=CRS.from_string(crs) if isinstance(crs, str) else crs,
-        transform=transform,
-        compress="deflate",
-    ) as dst:
-        dst.write(wse, 1)
-
-    return out_path
+    return _write_geotiff(wse, out_path, transform, crs)

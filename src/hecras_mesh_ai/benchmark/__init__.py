@@ -11,10 +11,12 @@ computed at any (x, y, t) from a formula.
 
 from hecras_mesh_ai.benchmark.thacker import (
     ThackerBowl,
+    generate_initial_wse_raster,
     generate_thacker_terrain,
 )
 
 __all__ = [
     "ThackerBowl",
+    "generate_initial_wse_raster",
     "generate_thacker_terrain",
 ]
