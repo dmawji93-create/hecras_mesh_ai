@@ -1,7 +1,16 @@
 # ADR 013: Bulk Corpus Access Strategy — NOAA OWP S3 primary, FEMA BLE secondary
 
-**Status:** Proposed
+**Status:** Superseded by ADR-014 (2026-08-24)
 **Date:** 2026-05-24
+
+> **Amendment (2026-08-24).** Phase 3A is dead: ESIP credentials were
+> requested 2026-05-24 and no response arrived in 13 weeks. Client
+> data is additionally unavailable for model training. The
+> corpus is now manufactured rather than acquired — see **ADR 014
+> (certified-synthetic data strategy)**. The 3B-email path survives as an
+> opportunistic side channel only (bonus evaluation data, not a
+> dependency). Original text preserved unchanged below; this ADR was
+> acted on in good faith (Phase 3A step 1) but never reached Accepted.
 
 ## Context
 
