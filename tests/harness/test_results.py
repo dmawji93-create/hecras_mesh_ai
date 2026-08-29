@@ -14,6 +14,8 @@ from hecras_mesh_ai.harness import (
     max_depth,
     max_face_velocity,
     max_water_surface,
+    run_completed,
+    solution_status,
 )
 from hecras_mesh_ai.harness.results import _resolve_area
 
@@ -35,10 +37,18 @@ def _make_results_hdf(
     wse_values: tuple[float, ...] = (10.0, 11.0, 12.0, 13.0),
     z_min: tuple[float, ...] = (5.0, 6.0, 15.0, 7.0),  # cell 2 stays dry
     face_velocity: tuple[float, ...] = (0.1, 0.2, -0.3, 0.5, 0.7),
+    solution: bytes | None = b"Unsteady Finished Successfully",
 ) -> Path:
-    """Build a near-minimal results HDF with one 2D flow area."""
+    """Build a near-minimal results HDF with one 2D flow area.
+
+    `solution=None` omits the completion marker, mimicking the partial
+    results file a crashed compute leaves behind.
+    """
     p = tmp_path / "synthetic.p01.hdf"
     with h5py.File(p, "w") as f:
+        if solution is not None:
+            summary = f.create_group("Results/Unsteady/Summary")
+            summary.attrs["Solution"] = np.bytes_(solution)
         # Area attributes table.
         attrs = np.zeros(1, dtype=_AREA_ATTRS_DTYPE)
         attrs[0] = (_AREA.encode("utf-8"), 0.035)
@@ -130,6 +140,45 @@ def test_max_water_surface_handles_explicit_area_name(tmp_path):
     p = _make_results_hdf(tmp_path)
     da = max_water_surface(p, area_name=_AREA)
     assert da.attrs["area_name"] == _AREA
+
+
+# ---------------------------------------------------------------------------
+# Run-completion validation (audit: partial results parse into plausible
+# garbage without any error)
+# ---------------------------------------------------------------------------
+
+
+def test_solution_status_reads_marker(tmp_path):
+    p = _make_results_hdf(tmp_path)
+    assert solution_status(p) == "Unsteady Finished Successfully"
+    assert run_completed(p)
+
+
+def test_solution_status_empty_when_marker_absent(tmp_path):
+    p = _make_results_hdf(tmp_path, solution=None)
+    assert solution_status(p) == ""
+    assert not run_completed(p)
+
+
+def test_run_completed_false_for_unstable_run(tmp_path):
+    p = _make_results_hdf(tmp_path, solution=b"Unsteady Went Unstable")
+    assert not run_completed(p)
+
+
+def test_max_readers_refuse_incomplete_results(tmp_path):
+    p = _make_results_hdf(tmp_path, solution=None)
+    with pytest.raises(ValueError, match="finished"):
+        max_water_surface(p)
+    with pytest.raises(ValueError, match="finished"):
+        max_depth(p)
+    with pytest.raises(ValueError, match="finished"):
+        max_face_velocity(p)
+
+
+def test_max_readers_allow_incomplete_when_asked(tmp_path):
+    p = _make_results_hdf(tmp_path, solution=None)
+    da = max_water_surface(p, allow_incomplete=True)
+    assert da.shape == (4,)
 
 
 # ---------------------------------------------------------------------------

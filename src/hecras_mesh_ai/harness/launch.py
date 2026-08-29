@@ -10,8 +10,21 @@ need a human clicking the Compute button. Two backends:
                     HEC-RAS 7.0 CLI is essentially undocumented, so
                     this path is empirical and may need adjustment.
 
-Success is detected by checking that the expected `.pNN.hdf` results
-file exists and has an mtime newer than the run-start timestamp.
+Success requires BOTH of:
+  1. the expected `.pNN.hdf` results file exists with an mtime newer
+     than the overall run-start timestamp, AND
+  2. the results HDF's `/Results/Unsteady/Summary@Solution` attribute
+     records a finished run ("... Finished Successfully").
+
+The second check is what makes the detection trustworthy: a compute
+that crashes mid-solve leaves a fresh but PARTIAL results file, which
+mtime alone would happily bless — and the CLI fallback would then
+"succeed" against the wreckage of the COM attempt. The Solution
+attribute is written only by a completed engine run.
+
+The COM compute runs in a worker thread under a hard timeout; on
+expiry, any Ras.exe processes spawned since the attempt started are
+killed so a hung solve can't orphan the machine.
 
 Requires the `harness` extra (pywin32) and a HEC-RAS install on
 Windows. Non-Windows environments cannot use the COM backend; the CLI
@@ -24,9 +37,12 @@ import contextlib
 import re
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from hecras_mesh_ai.harness.results import run_completed
 
 # pywin32 is Windows-only and lives behind the `harness` extra. Import
 # lazily inside the COM functions so unit tests on other platforms /
@@ -123,53 +139,83 @@ def _expected_results_hdf(project_prj: Path, plan_id: str) -> Path:
 
 
 def _detect_success(results_hdf: Path, start_time: float) -> bool:
-    """Did the run produce a fresh results HDF after start_time?"""
+    """Did the run produce a fresh AND finished results HDF?
+
+    Freshness (mtime >= start_time, 1 s filesystem slack) proves the
+    file belongs to this run; the Solution completion marker proves the
+    engine actually finished. Either alone can be fooled — a crashed
+    solve leaves a fresh partial file, and a finished file from an
+    earlier run is stale.
+    """
     if not results_hdf.is_file():
         return False
-    return results_hdf.stat().st_mtime >= start_time - 1.0
+    if results_hdf.stat().st_mtime < start_time - 1.0:
+        return False
+    return run_completed(results_hdf)
 
 
-def run_plan_com(
+def _ras_pids() -> set[int]:
+    """PIDs of currently-running Ras.exe processes (empty set off-Windows/on error)."""
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq Ras.exe", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    pids: set[int] = set()
+    for line in out.splitlines():
+        parts = [p.strip('"') for p in line.split('","')]
+        if len(parts) >= 2 and parts[0].lower() == "ras.exe":
+            with contextlib.suppress(ValueError):
+                pids.add(int(parts[1]))
+    return pids
+
+
+def _kill_ras_pids(pids: set[int]) -> list[int]:
+    """Force-kill the given Ras.exe PIDs; returns those we attempted."""
+    killed: list[int] = []
+    for pid in sorted(pids):
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/F"],
+                capture_output=True,
+                timeout=15,
+                check=False,
+            )
+            killed.append(pid)
+    return killed
+
+
+def _run_plan_com_session(
     install: RasInstall,
     project_prj: Path,
     plan_id: str,
+    expected_hdf: Path,
     *,
-    show_window: bool = False,
+    show_window: bool,
+    start: float,
+    start_wall: float,
 ) -> RunResult:
-    """Launch a compute via the HECRASController COM interface.
+    """The COM conversation itself. Runs inside the worker thread."""
+    import win32com.client
 
-    `plan_id` is the two-digit plan number ("04", not "p04"). HEC-RAS
-    enumerates plans by display name internally; we look the plan up by
-    its `.pNN` filename to map to the COM API's expected identifier.
-    """
-    start = time.monotonic()
-    start_wall = time.time()
-    expected_hdf = _expected_results_hdf(project_prj, plan_id)
-
-    # pywin32 import is deferred so this module is importable on
-    # non-Windows / no-extras environments.
-    try:
-        import pythoncom  # noqa: F401  (initializes COM threading)
-        import win32com.client
-    except ImportError as e:
-        return RunResult(
-            success=False,
-            backend="com",
-            results_hdf=None,
-            duration_seconds=0.0,
-            error=f"pywin32 not available (install with `uv sync --extra harness`): {e}",
-        )
-
-    try:
-        hec = win32com.client.Dispatch(install.com_prog_id)
-    except Exception as e:  # noqa: BLE001  (COM exceptions are varied)
+    def _fail(msg: str) -> RunResult:
         return RunResult(
             success=False,
             backend="com",
             results_hdf=None,
             duration_seconds=time.monotonic() - start,
-            error=f"could not dispatch {install.com_prog_id!r}: {e}",
+            error=msg,
         )
+
+    try:
+        hec = win32com.client.Dispatch(install.com_prog_id)
+    except Exception as e:  # noqa: BLE001  (COM exceptions are varied)
+        return _fail(f"could not dispatch {install.com_prog_id!r}: {e}")
 
     try:
         if show_window:
@@ -185,21 +231,14 @@ def run_plan_com(
         try:
             _count, plan_titles, _ = hec.Plan_Names(0, None, False)
         except Exception as e:  # noqa: BLE001
-            hec.QuitRas()
-            return RunResult(
-                success=False,
-                backend="com",
-                results_hdf=None,
-                duration_seconds=time.monotonic() - start,
-                error=f"Plan_Names call failed: {e}",
-            )
+            return _fail(f"Plan_Names call failed: {e}")
 
         # Map plan display titles to their .pNN file paths via
         # Plan_GetFilename, find the one ending in .p<plan_id>.
         target_suffix = f".p{plan_id}".lower()
         matched_title: str | None = None
         title_to_filename: dict[str, str] = {}
-        for title in plan_titles:
+        for title in plan_titles or ():
             try:
                 raw = hec.Plan_GetFilename(title)
             except Exception:  # noqa: BLE001
@@ -214,33 +253,28 @@ def run_plan_com(
                 break
 
         if matched_title is None:
-            hec.QuitRas()
-            return RunResult(
-                success=False,
-                backend="com",
-                results_hdf=None,
-                duration_seconds=time.monotonic() - start,
-                error=(
-                    f"no plan with filename suffix {target_suffix!r}; "
-                    f"available: {title_to_filename!r}"
-                ),
+            return _fail(
+                f"no plan with filename suffix {target_suffix!r}; "
+                f"available: {title_to_filename!r}"
             )
 
-        hec.Plan_SetCurrent(matched_title)
+        # Plan_SetCurrent returns a success bool. If selection silently
+        # failed, Compute_CurrentPlan would compute — and clobber the
+        # results of — whichever plan happened to be current. Refuse.
+        set_ret = hec.Plan_SetCurrent(matched_title)
+        set_ok = bool(set_ret[0]) if isinstance(set_ret, tuple) else bool(set_ret)
+        if not set_ok:
+            return _fail(
+                f"Plan_SetCurrent({matched_title!r}) returned False — "
+                "refusing to compute whichever plan was already current"
+            )
 
         # Compute_CurrentPlan(NMsg, Messages, Blocking). pywin32 returns
         # the function result; output params become extra return values.
         try:
             ret = hec.Compute_CurrentPlan(0, None, True)
         except Exception as e:  # noqa: BLE001
-            hec.QuitRas()
-            return RunResult(
-                success=False,
-                backend="com",
-                results_hdf=None,
-                duration_seconds=time.monotonic() - start,
-                error=f"Compute_CurrentPlan raised: {e}",
-            )
+            return _fail(f"Compute_CurrentPlan raised: {e}")
 
         # `ret` may be a bool or a tuple of (bool, NMsg, Messages).
         if isinstance(ret, tuple):
@@ -250,26 +284,118 @@ def run_plan_com(
             compute_ok = bool(ret)
             compute_err = ""
 
-        hec.QuitRas()
+        # Quit before success detection so the results file is fully
+        # released — but never let a QuitRas hiccup convert a completed
+        # compute into a reported failure (the finally re-tries anyway).
+        with contextlib.suppress(Exception):
+            hec.QuitRas()
 
-        success = compute_ok and _detect_success(expected_hdf, start_wall)
+        fresh_and_finished = _detect_success(expected_hdf, start_wall)
+        success = compute_ok and fresh_and_finished
         return RunResult(
             success=success,
             backend="com",
             results_hdf=expected_hdf if success else None,
             duration_seconds=time.monotonic() - start,
-            error="" if success else f"compute returned ok={compute_ok}; {compute_err}",
+            error=(
+                ""
+                if success
+                else f"compute returned ok={compute_ok}; "
+                f"results fresh+finished={fresh_and_finished}; {compute_err}"
+            ),
         )
     except Exception as e:  # noqa: BLE001
+        return _fail(f"COM exception: {e}")
+    finally:
         with contextlib.suppress(Exception):
             hec.QuitRas()
+
+
+def run_plan_com(
+    install: RasInstall,
+    project_prj: Path,
+    plan_id: str,
+    *,
+    show_window: bool = False,
+    timeout_seconds: float = 3600.0,
+    start_wall: float | None = None,
+) -> RunResult:
+    """Launch a compute via the HECRASController COM interface.
+
+    `plan_id` is the two-digit plan number ("04", not "p04"). HEC-RAS
+    enumerates plans by display name internally; we look the plan up by
+    its `.pNN` filename to map to the COM API's expected identifier.
+
+    The COM session runs in a worker thread (its own COM apartment)
+    bounded by `timeout_seconds`. `Compute_CurrentPlan(blocking=True)`
+    has no timeout of its own — a non-converging solve or a modal
+    dialog would otherwise block Python forever. On expiry, Ras.exe
+    processes spawned since this attempt started are force-killed.
+
+    `start_wall` lets the orchestrator share one run-start timestamp
+    across backends for the freshness check; defaults to now.
+    """
+    start = time.monotonic()
+    if start_wall is None:
+        start_wall = time.time()
+    expected_hdf = _expected_results_hdf(project_prj, plan_id)
+
+    try:
+        import pythoncom
+        import win32com.client  # noqa: F401
+    except ImportError as e:
+        return RunResult(
+            success=False,
+            backend="com",
+            results_hdf=None,
+            duration_seconds=0.0,
+            error=f"pywin32 not available (install with `uv sync --extra harness`): {e}",
+        )
+
+    pids_before = _ras_pids()
+    box: list[RunResult] = []
+
+    def _worker() -> None:
+        pythoncom.CoInitialize()
+        try:
+            result = _run_plan_com_session(
+                install,
+                project_prj,
+                plan_id,
+                expected_hdf,
+                show_window=show_window,
+                start=start,
+                start_wall=start_wall,
+            )
+            box.append(result)
+        finally:
+            pythoncom.CoUninitialize()
+
+    thread = threading.Thread(target=_worker, daemon=True, name="hecras-com-compute")
+    thread.start()
+    thread.join(timeout_seconds)
+
+    if thread.is_alive():
+        killed = _kill_ras_pids(_ras_pids() - pids_before)
         return RunResult(
             success=False,
             backend="com",
             results_hdf=None,
             duration_seconds=time.monotonic() - start,
-            error=f"COM exception: {e}",
+            error=(
+                f"COM compute exceeded timeout_seconds={timeout_seconds}; "
+                f"killed Ras.exe pids {killed or '(none found)'}"
+            ),
         )
+    if not box:
+        return RunResult(
+            success=False,
+            backend="com",
+            results_hdf=None,
+            duration_seconds=time.monotonic() - start,
+            error="COM worker terminated without producing a result",
+        )
+    return box[0]
 
 
 def run_plan_cli(
@@ -278,17 +404,20 @@ def run_plan_cli(
     plan_id: str,
     *,
     timeout_seconds: float = 3600,
+    start_wall: float | None = None,
 ) -> RunResult:
     """Best-effort CLI launch via Ras.exe.
 
     HEC-RAS 7.0's CLI surface is undocumented. We try the most commonly
     cited invocation patterns (`-c` for compute) and detect success by
-    the same fresh-`.pNN.hdf`-mtime test as the COM path. If this turns
-    out to spawn the GUI instead of running headless, the caller's
-    timeout will trip and we'll know to fall back to COM.
+    the same fresh-AND-finished results-HDF test as the COM path — the
+    completion check is what stops the known-degenerate `-c` invocation
+    (exit 0, computes nothing) from ever reporting a false success
+    against a leftover or partial results file.
     """
     start = time.monotonic()
-    start_wall = time.time()
+    if start_wall is None:
+        start_wall = time.time()
     expected_hdf = _expected_results_hdf(project_prj, plan_id)
 
     cmd = [
@@ -316,7 +445,8 @@ def run_plan_cli(
             error=f"timed out after {timeout_seconds}s (likely the CLI launched the GUI)",
         )
 
-    success = proc.returncode == 0 and _detect_success(expected_hdf, start_wall)
+    fresh_and_finished = _detect_success(expected_hdf, start_wall)
+    success = proc.returncode == 0 and fresh_and_finished
     return RunResult(
         success=success,
         backend="cli",
@@ -327,8 +457,7 @@ def run_plan_cli(
         error=(
             ""
             if success
-            else f"exit={proc.returncode}; results-hdf-fresh="
-            f"{_detect_success(expected_hdf, start_wall)}"
+            else f"exit={proc.returncode}; results fresh+finished={fresh_and_finished}"
         ),
     )
 
@@ -339,6 +468,7 @@ def run_plan(
     *,
     install: RasInstall | None = None,
     prefer: str = "com",
+    com_timeout_seconds: float = 3600,
     cli_timeout_seconds: float = 3600,
     show_window: bool = False,
 ) -> RunResult:
@@ -355,12 +485,16 @@ def run_plan(
     prefer
         "com" (default) or "cli". The other is tried as fallback if the
         first fails.
-    cli_timeout_seconds
-        Hard ceiling on CLI subprocess. The default (1 h) is intended
-        to comfortably cover Muncie-scale runs.
+    com_timeout_seconds, cli_timeout_seconds
+        Hard ceilings per backend. The defaults (1 h) comfortably cover
+        Muncie-scale runs.
 
-    Returns RunResult — `success` reflects fresh-results-file detection,
-    not just the backend's return code.
+    Returns RunResult — `success` requires a results HDF that is both
+    fresh (mtime after this call started; one shared timestamp across
+    backends) and finished (the engine's Solution completion marker),
+    never just a backend's return code. On total failure, `error`
+    concatenates every attempted backend's error so the informative
+    one isn't shadowed by the fallback's.
     """
     project_prj = Path(project_prj)
     if not project_prj.is_file():
@@ -395,14 +529,32 @@ def run_plan(
     if prefer not in {"com", "cli"}:
         raise ValueError(f"prefer must be 'com' or 'cli'; got {prefer!r}")
 
+    start_wall = time.time()
     order = [prefer, "cli" if prefer == "com" else "com"]
+    attempts: list[tuple[str, RunResult]] = []
     last: RunResult | None = None
     for backend in order:
         if backend == "com":
-            last = run_plan_com(install, project_prj, plan_id, show_window=show_window)
+            last = run_plan_com(
+                install,
+                project_prj,
+                plan_id,
+                show_window=show_window,
+                timeout_seconds=com_timeout_seconds,
+                start_wall=start_wall,
+            )
         else:
-            last = run_plan_cli(install, project_prj, plan_id, timeout_seconds=cli_timeout_seconds)
+            last = run_plan_cli(
+                install,
+                project_prj,
+                plan_id,
+                timeout_seconds=cli_timeout_seconds,
+                start_wall=start_wall,
+            )
+        attempts.append((backend, last))
         if last.success:
             return last
     assert last is not None
+    if len(attempts) > 1:
+        last.error = " | ".join(f"{b}: {r.error}" for b, r in attempts)
     return last

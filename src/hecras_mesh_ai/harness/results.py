@@ -36,6 +36,54 @@ import xarray as xr
 
 _GEOMETRY_2D = "/Geometry/2D Flow Areas"
 _RESULTS_2D = "/Results/Unsteady/Output/Output Blocks/Base Output/" "Summary Output/2D Flow Areas"
+_UNSTEADY_SUMMARY = "/Results/Unsteady/Summary"
+_FINISHED_MARKER = "Finished Successfully"
+
+
+def _solution_status_from(f: h5py.File) -> str:
+    """Solver completion marker from an open results HDF ('' when absent).
+
+    HEC-RAS writes `/Results/Unsteady/Summary@Solution` (e.g.
+    b"Unsteady Finished Successfully") only when the engine finishes. A
+    crashed or killed run leaves the attribute (or the whole Summary
+    group) missing — which is exactly the signal we need to distinguish
+    a partial results file from a real one.
+    """
+    summary = f.get(_UNSTEADY_SUMMARY)
+    if summary is None:
+        return ""
+    sol = summary.attrs.get("Solution")
+    if sol is None:
+        return ""
+    if isinstance(sol, np.ndarray):
+        sol = sol[0] if sol.size else b""
+    if isinstance(sol, bytes):
+        return sol.decode("utf-8", errors="replace")
+    return str(sol)
+
+
+def solution_status(hdf_path: Path | str) -> str:
+    """The solver's completion marker for a results HDF ('' when absent/unreadable)."""
+    try:
+        with h5py.File(Path(hdf_path), "r") as f:
+            return _solution_status_from(f)
+    except OSError:
+        return ""
+
+
+def run_completed(hdf_path: Path | str) -> bool:
+    """True iff the results HDF records a successfully finished unsteady run."""
+    return _FINISHED_MARKER in solution_status(hdf_path)
+
+
+def _require_finished(f: h5py.File, hdf_path: Path) -> None:
+    status = _solution_status_from(f)
+    if _FINISHED_MARKER not in status:
+        raise ValueError(
+            f"{hdf_path} does not record a finished run "
+            f"(Solution={status!r}); refusing to parse maxima from a "
+            "partial/failed results file. Pass allow_incomplete=True to override."
+        )
 
 
 def list_2d_flow_areas(hdf_path: Path | str) -> list[str]:
@@ -81,7 +129,15 @@ def _read_max_dataset(
 ) -> tuple[np.ndarray, np.ndarray, str, str]:
     """Read a (2, N) Maximum* dataset into (values, times, value_units, time_units)."""
     path = f"{_RESULTS_2D}/{area}/{dataset_name}"
-    ds = f[path]
+    try:
+        ds = f[path]
+    except KeyError as e:
+        status = _solution_status_from(f)
+        raise KeyError(
+            f"{path} not found — the results HDF looks incomplete "
+            f"(solver status: {status or 'absent'}). Was the run killed, "
+            "or did the compute fail before writing summary output?"
+        ) from e
     arr = ds[:]
     if arr.ndim != 2 or arr.shape[0] != 2:
         raise ValueError(f"{path} shape {arr.shape} not (2, N); schema assumption broken")
@@ -123,7 +179,12 @@ def _inactive_cell_mask(z_min: np.ndarray) -> np.ndarray:
     return np.isnan(z_min)
 
 
-def max_water_surface(hdf_path: Path | str, area_name: str | None = None) -> xr.DataArray:
+def max_water_surface(
+    hdf_path: Path | str,
+    area_name: str | None = None,
+    *,
+    allow_incomplete: bool = False,
+) -> xr.DataArray:
     """Per-cell max water-surface elevation across the simulation.
 
     The DataArray has dim `cell` of size N_cells, with 1-D coords
@@ -132,9 +193,15 @@ def max_water_surface(hdf_path: Path | str, area_name: str | None = None) -> xr.
 
     Inactive ghost cells (those whose `Cells Minimum Elevation` is
     NaN) are masked to NaN in both the value and the time_of_max.
+
+    Raises ValueError if the HDF does not record a finished run
+    (partial files from crashed computes parse into plausible-looking
+    garbage); pass `allow_incomplete=True` to bypass.
     """
     hdf_path = Path(hdf_path)
     with h5py.File(hdf_path, "r") as f:
+        if not allow_incomplete:
+            _require_finished(f, hdf_path)
         area = _resolve_area(f, area_name)
         values, times, units, time_units = _read_max_dataset(f, area, "Maximum Water Surface")
         xy = _cell_xy(f, area)
@@ -161,15 +228,23 @@ def max_water_surface(hdf_path: Path | str, area_name: str | None = None) -> xr.
     )
 
 
-def max_depth(hdf_path: Path | str, area_name: str | None = None) -> xr.DataArray:
+def max_depth(
+    hdf_path: Path | str,
+    area_name: str | None = None,
+    *,
+    allow_incomplete: bool = False,
+) -> xr.DataArray:
     """Per-cell max depth = max_WSE - cell_min_elevation.
 
     Returns a DataArray on the same cell grid as `max_water_surface`,
     clipped at 0 (dry cells where WSE < min elevation). Inactive
-    ghost cells (z_min == NaN) are returned as NaN.
+    ghost cells (z_min == NaN) are returned as NaN. Raises ValueError
+    on unfinished runs unless `allow_incomplete=True`.
     """
     hdf_path = Path(hdf_path)
     with h5py.File(hdf_path, "r") as f:
+        if not allow_incomplete:
+            _require_finished(f, hdf_path)
         area = _resolve_area(f, area_name)
         values, times, units, time_units = _read_max_dataset(f, area, "Maximum Water Surface")
         xy = _cell_xy(f, area)
@@ -198,17 +273,25 @@ def max_depth(hdf_path: Path | str, area_name: str | None = None) -> xr.DataArra
     )
 
 
-def max_face_velocity(hdf_path: Path | str, area_name: str | None = None) -> xr.DataArray:
+def max_face_velocity(
+    hdf_path: Path | str,
+    area_name: str | None = None,
+    *,
+    allow_incomplete: bool = False,
+) -> xr.DataArray:
     """Per-face max velocity magnitude across the simulation.
 
     Stored on the face grid (N_faces, not N_cells). Velocity is signed
     in the dataset; the "maximum" here is HEC-RAS's max-absolute
     convention (the dataset shipped contains signed values whose max
     abs over time was recorded). Caller should `abs()` if magnitude
-    matters.
+    matters. Raises ValueError on unfinished runs unless
+    `allow_incomplete=True`.
     """
     hdf_path = Path(hdf_path)
     with h5py.File(hdf_path, "r") as f:
+        if not allow_incomplete:
+            _require_finished(f, hdf_path)
         area = _resolve_area(f, area_name)
         values, times, units, time_units = _read_max_dataset(f, area, "Maximum Face Velocity")
         xy = _face_midpoint_xy(f, area)

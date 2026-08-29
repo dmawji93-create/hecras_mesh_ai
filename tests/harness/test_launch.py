@@ -7,16 +7,28 @@ import sys
 import time
 from pathlib import Path
 
+import h5py
+import numpy as np
 import pytest
 
-from hecras_mesh_ai.harness import RasInstall, find_ras_install
+from hecras_mesh_ai.harness import RasInstall, RunResult, find_ras_install
 from hecras_mesh_ai.harness.launch import (
     _build_install,
     _detect_success,
     _expected_results_hdf,
     run_plan,
     run_plan_cli,
+    run_plan_com,
 )
+
+
+def _write_results_hdf(path: Path, *, solution: bytes | None) -> None:
+    """Minimal results HDF; `solution=None` mimics a crashed/partial run."""
+    with h5py.File(path, "w") as f:
+        if solution is not None:
+            g = f.create_group("Results/Unsteady/Summary")
+            g.attrs["Solution"] = np.bytes_(solution)
+
 
 # ---------------------------------------------------------------------------
 # Pure-Python helpers (no HEC-RAS or COM needed)
@@ -100,9 +112,9 @@ def test_expected_results_hdf_maps_plan_id():
     assert _expected_results_hdf(p, "01") == Path("/tmp/Foo.p01.hdf")
 
 
-def test_detect_success_true_when_file_fresh(tmp_path):
+def test_detect_success_true_when_fresh_and_finished(tmp_path):
     f = tmp_path / "results.p01.hdf"
-    f.write_bytes(b"x")
+    _write_results_hdf(f, solution=b"Unsteady Finished Successfully")
     assert _detect_success(f, start_time=time.time() - 5)
 
 
@@ -113,11 +125,31 @@ def test_detect_success_false_when_file_missing(tmp_path):
 
 def test_detect_success_false_when_file_stale(tmp_path):
     f = tmp_path / "results.p01.hdf"
-    f.write_bytes(b"x")
-    # Backdate mtime to before start_time.
+    _write_results_hdf(f, solution=b"Unsteady Finished Successfully")
+    # Backdate mtime to before start_time — finished, but from an old run.
     old = time.time() - 1000
     os.utime(f, (old, old))
     assert not _detect_success(f, start_time=time.time())
+
+
+def test_detect_success_false_when_no_completion_marker(tmp_path):
+    """A fresh but PARTIAL results file (crashed compute) must not pass —
+    the fake-success-laundering regression test."""
+    f = tmp_path / "results.p01.hdf"
+    _write_results_hdf(f, solution=None)
+    assert not _detect_success(f, start_time=time.time() - 5)
+
+
+def test_detect_success_false_when_run_went_unstable(tmp_path):
+    f = tmp_path / "results.p01.hdf"
+    _write_results_hdf(f, solution=b"Unsteady Went Unstable")
+    assert not _detect_success(f, start_time=time.time() - 5)
+
+
+def test_detect_success_false_on_non_hdf_junk(tmp_path):
+    f = tmp_path / "results.p01.hdf"
+    f.write_bytes(b"not an hdf5 file")
+    assert not _detect_success(f, start_time=time.time() - 5)
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +226,99 @@ def test_run_plan_cli_reports_nonzero_exit(tmp_path):
     result = run_plan_cli(install, prj, "01", timeout_seconds=10)
     assert not result.success
     assert "exit=7" in result.error
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="CLI test is Windows-only")
+def test_run_plan_cli_exit_zero_without_results_is_failure(tmp_path):
+    """The known-degenerate `-c` invocation exits 0 having computed nothing."""
+    fake = _make_fake_ras_exe(tmp_path, exit_code=0)
+    install = RasInstall(
+        version="0.0",
+        install_dir=tmp_path,
+        ras_exe=fake,
+        com_prog_id="RAS00.HECRASController",
+    )
+    prj = tmp_path / "demo.prj"
+    prj.write_bytes(b"")
+    result = run_plan_cli(install, prj, "01", timeout_seconds=10)
+    assert not result.success
+    assert "fresh+finished=False" in result.error
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="CLI test is Windows-only")
+def test_run_plan_cli_exit_zero_with_partial_results_is_failure(tmp_path):
+    """Fresh-but-unfinished results (e.g. the wreckage of a crashed COM
+    attempt) must not be laundered into a CLI 'success'."""
+    fake = _make_fake_ras_exe(tmp_path, exit_code=0)
+    install = RasInstall(
+        version="0.0",
+        install_dir=tmp_path,
+        ras_exe=fake,
+        com_prog_id="RAS00.HECRASController",
+    )
+    prj = tmp_path / "demo.prj"
+    prj.write_bytes(b"")
+    _write_results_hdf(tmp_path / "demo.p01.hdf", solution=None)  # fresh, partial
+    result = run_plan_cli(install, prj, "01", timeout_seconds=10)
+    assert not result.success
+
+
+# ---------------------------------------------------------------------------
+# COM timeout and orchestrator error reporting (no real HEC-RAS involved)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="COM path is Windows-only")
+def test_run_plan_com_timeout_returns_failure(tmp_path, monkeypatch):
+    """A hung COM session must be bounded by timeout_seconds."""
+    pytest.importorskip("win32com.client")
+
+    def _hang(*_a, **_k):
+        time.sleep(10)
+
+    monkeypatch.setattr("hecras_mesh_ai.harness.launch._run_plan_com_session", _hang)
+    install = RasInstall(
+        version="0.0",
+        install_dir=tmp_path,
+        ras_exe=tmp_path / "Ras.exe",
+        com_prog_id="RAS00.HECRASController",
+    )
+    prj = tmp_path / "demo.prj"
+    prj.write_bytes(b"")
+    result = run_plan_com(install, prj, "01", timeout_seconds=0.5)
+    assert not result.success
+    assert "exceeded timeout" in result.error
+
+
+def test_run_plan_concatenates_backend_errors(tmp_path, monkeypatch):
+    """On total failure the informative backend error must not be shadowed
+    by the fallback's generic one."""
+    if sys.platform != "win32":
+        pytest.skip("Windows guard fires first on non-Windows")
+    prj = tmp_path / "x.prj"
+    prj.write_bytes(b"")
+
+    def _fake_com(*_a, **_k):
+        return RunResult(False, "com", None, 0.1, error="com says: informative diagnosis")
+
+    def _fake_cli(*_a, **_k):
+        return RunResult(False, "cli", None, 0.1, error="cli says: generic failure")
+
+    monkeypatch.setattr("hecras_mesh_ai.harness.launch.run_plan_com", _fake_com)
+    monkeypatch.setattr("hecras_mesh_ai.harness.launch.run_plan_cli", _fake_cli)
+    monkeypatch.setattr(
+        "hecras_mesh_ai.harness.launch.find_ras_install",
+        lambda **_kw: RasInstall(
+            version="0.0",
+            install_dir=tmp_path,
+            ras_exe=tmp_path / "Ras.exe",
+            com_prog_id="RAS00.HECRASController",
+        ),
+    )
+    result = run_plan(prj, "01")
+    assert not result.success
+    assert "com says: informative diagnosis" in result.error
+    assert "cli says: generic failure" in result.error
 
 
 # ---------------------------------------------------------------------------

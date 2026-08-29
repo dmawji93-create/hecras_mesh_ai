@@ -163,16 +163,48 @@ def test_replace_breaklines_refuses_to_overwrite_existing_target(tmp_path):
         replace_breaklines(src, tgt, [])
 
 
-def test_replace_breaklines_in_place_patches_without_copy_error(tmp_path):
-    """source==target should patch the file in place, not error on copy."""
+def test_replace_breaklines_in_place_requires_overwrite(tmp_path):
+    """source==target mutates the ORIGINAL file — that needs explicit opt-in.
+
+    Regression for the audit finding that flag-less in-place calls silently
+    destroyed the original breaklines (contradicting the docstring)."""
     src = _make_minimal_source_hdf(tmp_path)
     bls = [Breakline(name="InPlace", points=np.array([[0.0, 0.0], [1.0, 1.0]]))]
-    out = replace_breaklines(src, src, bls)
+    with pytest.raises(FileExistsError, match="in-place"):
+        replace_breaklines(src, src, bls)
+    # Original untouched — the placeholder breakline is still there.
+    with h5py.File(src, "r") as f:
+        assert f[BREAKLINES_PATH]["Attributes"][0]["Name"] == b""
+
+
+def test_replace_breaklines_in_place_with_overwrite_patches_file(tmp_path):
+    """With overwrite=True, source==target patches in place, no copy error."""
+    src = _make_minimal_source_hdf(tmp_path)
+    bls = [Breakline(name="InPlace", points=np.array([[0.0, 0.0], [1.0, 1.0]]))]
+    out = replace_breaklines(src, src, bls, overwrite=True)
     assert out == src
     with h5py.File(src, "r") as f:
         assert f[BREAKLINES_PATH]["Attributes"][0]["Name"] == b"InPlace"
         # Preserved-marker sentinel must survive in-place patching.
         np.testing.assert_array_equal(f["/Geometry/2D Flow Areas/Preserved Marker"][:], [1, 2, 3])
+
+
+def test_read_breaklines_refuses_multipart(tmp_path):
+    """Multi-part breaklines must fail loudly, not silently weld parts
+    together with a bridge segment (audit finding — corpus files can be
+    multi-part even though both pilots are single-part)."""
+    p = tmp_path / "multi.g01.hdf"
+    with h5py.File(p, "w") as f:
+        g = f.create_group(BREAKLINES_PATH)
+        attrs = np.zeros(1, dtype=ATTRIBUTES_DTYPE)
+        attrs[0]["Name"] = b"TwoPart"
+        g.create_dataset("Attributes", data=attrs)
+        # One feature, 5 points, 2 parts (3 + 2 points).
+        g.create_dataset("Polyline Info", data=np.array([[0, 5, 0, 2]], dtype=np.int32))
+        g.create_dataset("Polyline Parts", data=np.array([[0, 3], [3, 2]], dtype=np.int32))
+        g.create_dataset("Polyline Points", data=np.arange(10, dtype=np.float64).reshape(5, 2))
+    with pytest.raises(ValueError, match="multi-part"):
+        read_breaklines(p)
 
 
 def test_replace_breaklines_overwrites_when_flag_set(tmp_path):

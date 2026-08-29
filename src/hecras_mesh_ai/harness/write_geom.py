@@ -15,9 +15,12 @@ Layout (verified against Muncie.g04.hdf, see docs/hdf-schema/README.md):
     │                       to each feature's own point block, not global.
     └── Polyline Points   (N_points,   2) float64 — X, Y in geometry CRS
 
-Single-part polylines only (the common case). For multi-part lines we'd
-emit one Polyline Parts row per part with the offset relative to the
-feature's point block.
+Single-part polylines only (the common case). `read_breaklines` REFUSES
+multi-part features rather than silently concatenating them — a naive
+concat draws a spurious bridge segment across the gap between parts,
+which corrupts the geometry without any visible error. Multi-part
+support means adding a parts concept to `Breakline` and emitting one
+Polyline Parts row per part (offsets relative to the feature's block).
 """
 
 from __future__ import annotations
@@ -210,12 +213,15 @@ def replace_breaklines(
     source_hdf_path
         Existing valid HEC-RAS geometry HDF.
     target_hdf_path
-        Destination path. Must not exist unless `overwrite=True`.
+        Destination path. Must not exist unless `overwrite=True`. When
+        source == target the file is patched IN PLACE, which mutates
+        the original — this also requires `overwrite=True`, explicitly.
     breaklines
         New breaklines to write. Empty sequence removes the breaklines
         group entirely (matches projects that have no breaklines).
     overwrite
-        If True, replace an existing target file.
+        If True, replace an existing target file (or allow in-place
+        mutation of the source when source == target).
 
     Returns
     -------
@@ -225,8 +231,14 @@ def replace_breaklines(
     target = Path(target_hdf_path)
     if not source.exists():
         raise FileNotFoundError(f"source HDF does not exist: {source}")
-    in_place = source.resolve() == target.resolve()
-    if target.exists() and not overwrite and not in_place:
+    in_place = target.exists() and source.resolve() == target.resolve()
+    if in_place and not overwrite:
+        raise FileExistsError(
+            f"in-place breakline replacement would mutate the original file "
+            f"{target}; pass overwrite=True to allow it (keep a backup copy — "
+            "the original breaklines are destroyed)"
+        )
+    if target.exists() and not overwrite:
         raise FileExistsError(f"target HDF exists: {target} (pass overwrite=True to replace)")
     target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -252,6 +264,12 @@ def read_breaklines(hdf_path: Path | str) -> list[Breakline]:
     """Read existing breaklines from an HDF — used for round-trip tests.
 
     Returns an empty list if the HDF has no breaklines group.
+
+    Raises ValueError on multi-part breaklines: `Breakline` has no
+    parts concept, so a read-modify-write round trip would silently
+    weld the parts into one line with a spurious bridge segment across
+    each gap. Better to fail loudly until parts support exists. (Both
+    pilot projects are all single-part; corpus files may not be.)
     """
     hdf_path = Path(hdf_path)
     with h5py.File(hdf_path, "r") as f:
@@ -260,31 +278,28 @@ def read_breaklines(hdf_path: Path | str) -> list[Breakline]:
         g = f[BREAKLINES_PATH]
         attrs = g["Attributes"][:]
         info = g["Polyline Info"][:]
-        parts = g["Polyline Parts"][:]
         points = g["Polyline Points"][:]
 
     out: list[Breakline] = []
     for i in range(attrs.shape[0]):
         point_start = int(info[i, 0])
         point_count = int(info[i, 1])
-        part_start = int(info[i, 2])
         part_count = int(info[i, 3])
-        if part_count != 1:
-            # Multi-part: concat parts in order, using each part's offset
-            # relative to the feature's point block.
-            feature_points = points[point_start : point_start + point_count]
-            parts_pts = []
-            for p in range(part_start, part_start + part_count):
-                p_off = int(parts[p, 0])
-                p_cnt = int(parts[p, 1])
-                parts_pts.append(feature_points[p_off : p_off + p_cnt])
-            bl_points = np.concatenate(parts_pts, axis=0)
-        else:
-            bl_points = points[point_start : point_start + point_count]
 
         name = attrs[i]["Name"]
         if isinstance(name, bytes):
             name = name.decode("utf-8")
+
+        if part_count != 1:
+            raise ValueError(
+                f"breakline {name!r} in {hdf_path} has {part_count} parts; "
+                "multi-part breaklines are not supported — a naive concat "
+                "would bridge the gaps between parts and corrupt the "
+                "geometry on rewrite. Add parts support to Breakline "
+                "before processing this file."
+            )
+        bl_points = points[point_start : point_start + point_count]
+
         out.append(
             Breakline(
                 name=name,

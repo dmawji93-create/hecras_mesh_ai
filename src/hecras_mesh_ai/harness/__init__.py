@@ -24,6 +24,8 @@ from hecras_mesh_ai.harness.results import (
     max_depth,
     max_face_velocity,
     max_water_surface,
+    run_completed,
+    solution_status,
 )
 from hecras_mesh_ai.harness.write_geom import (
     Breakline,
@@ -43,6 +45,8 @@ __all__ = [
     "max_water_surface",
     "read_breaklines",
     "replace_breaklines",
+    "run_completed",
     "run_plan",
+    "solution_status",
     "walk_hdf",
 ]
