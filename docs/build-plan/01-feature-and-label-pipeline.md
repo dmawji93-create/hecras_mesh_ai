@@ -1,7 +1,7 @@
 # Stage 1 — Feature & Label Pipeline
 
 **Type:** ML (data engineering)
-**Status:** Not started
+**Status:** Complete (2026-05-23; ~15 commits ending 4cea3ad — checkpoint evidence in `docs/STATUS.md`. Scope note: TWI/flow-accumulation/ridge-network ancillary features were deferred to Stage 3.)
 **Depends on:** Week 1 plumbing (complete — see `STATUS.md`)
 **Maps to:** roadmap Phase A.0 Week 2
 

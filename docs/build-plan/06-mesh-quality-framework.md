@@ -1,7 +1,7 @@
 # Stage 6 — Mesh Quality Measurement Framework
 
 **Type:** Numerical methods
-**Status:** Not started
+**Status:** In progress (since 2026-05-26 — begun ahead of Stage 5 as the only unblocked path, per the "parallel with Stage 5" dependency note. Done: Thacker analytical benchmark, Task-7 groundwork built first deliberately (5c16fe8; deployment defects fixed 2026-08-24, 6c548cb). Next: wire Thacker into a HEC-RAS project; Task 1 grid-refinement runner.)
 **Depends on:** Stage 4. Can be developed in parallel with Stage 5.
 **Maps to:** ADR 011
 

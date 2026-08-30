@@ -1,7 +1,7 @@
 # Stage 4 — HEC-RAS Automation Harness
 
 **Type:** Engineering
-**Status:** Not started
+**Status:** Complete (2026-05-25; 6 commits ending 3752905, verified end-to-end against HEC-RAS 7.0 — see `docs/STATUS.md`. Hardened 2026-08-24 per the audit: completion-validated success detection, COM timeout, write guards — commit c7ff98a.)
 **Depends on:** Week 1 plumbing. Can be developed in parallel with Stages 2-3. **Required before Stage 5.**
 **Maps to:** roadmap Phase B prerequisite
 

@@ -1,9 +1,22 @@
 # Project Status — `hecras_mesh_ai`
 
-**As of:** 2026-05-25
-**Phase:** A.0 "make-one-work" sprint — **build-plan Stages 1, 2, and 4 complete**. Stage 3 (bulk-corpus harvesting) is **blocked on pending NOAA ESIP credentials** (email sent 2026-05-24). Next when unblocked / next here: **Stage 5 — wire the Stage 2 model output through the Stage 4 harness to close the breakline → simulation → score loop.**
+**As of:** 2026-08-24
+**Phase:** Phase A complete (Stages 1, 2, 4 + closing demo). **Stage 6 (mesh-quality framework) in progress.** Data strategy pivoted to the certified-synthetic factory (**ADR 014**); effective build order 1, 2, 4, 6 → 3 → 5. Next: wire the Thacker benchmark into a HEC-RAS project, then the Stage 6 grid-refinement runner.
 **Repo:** `C:\dev\hecras_mesh_ai\`
-**Branch:** `main` · 44 commits · remote: `github.com/dmawji93-create/hecras_mesh_ai` (private)
+**Branch:** `main` · remote: `github.com/dmawji93-create/hecras_mesh_ai` — **public, MIT-licensed** since 2026-08-24
+**Tests:** 251 (250 pass + 1 platform-guard skip), incl. a live HEC-RAS 7.0 integration run
+
+## 2026-08 resumption (after ~3 months idle)
+
+- **Full system audit (2026-08-23).** Five parallel deep-dives over the data pipeline, model/postprocess, harness, benchmark, and docs. Core math verified sound everywhere (Horn slope/aspect, curvatures, loss, sliding-window stitching, HDF polyline encoding, ghost-cell mask, Thacker solution — several independently re-derived). ~14 major defects found, concentrated at integration boundaries; docs/plan staleness flagged throughout (largely repaired in this refresh).
+- **Data strategy pivot — ADR 014.** NOAA ESIP credentials never arrived (13 weeks); client data is unavailable for training. The corpus is now *manufactured, not acquired*: rule/vector proposal tiers on public 3DEP terrain, certified by harness-run ablations scored against the Stage 6 error vector. Stage 3 rewritten accordingly and now depends on Stage 6.
+- **"Why this tool should exist" research** (`docs/research/why-no-physics-validated-meshing.md` + one-pager): the five reasons no flood package ships physics-validated meshing, the market-demand analysis (calibration absorbs mesh error only where calibration data exists — the uncalibratable regime is the certificate's beachhead), and the HEC-RAS 2025 competitive assessment (verdict: net tailwind; arcs + metadata become the natural product surface).
+- **Audit fixes landed (2026-08-24).** Thacker deployment defects (raster extent to (1+A)a, closed-form c0, exact registration, comparison protocol documented, independent-value + SWE-residual tests) — commit 6c548cb. Harness trust gaps (success requires fresh AND finished results via the `Solution` marker; COM timeout with orphan kill; in-place write opt-in; multi-part breakline refusal; completion-gated results parsing) — commit c7ff98a, verified against live HEC-RAS 7.0.
+- **Open-sourced.** MIT license, repo public, GitHub secret scanning + push protection enabled; full-history secret sweep clean.
+- **Bookkeeping correction:** the "Stage 5" label used below for the ML×harness wiring was a misnomer — build-plan Stage 5 is the resolution model. The wiring shipped as `scripts/phase_a_closing_demo.py` (commit 92c42ea, 2026-05-25): model → sliding-window inference → polylines → `replace_breaklines` → COM run → results parse, end-to-end on Muncie; the pipeline proved robust to bad model output (41 predicted breaklines land dry; max depth identical to baseline). An automated ML→harness integration test is still owed.
+- Still open: degenerate CLI fallback (COM primary; now completion-guarded), raster row-direction assumption (unchanged), W&B not wired (decide at Stage 3), remaining audit minors (tracked in session record), pre-commit ruff pinned older than dev ruff.
+
+*Counts and "next" statements below this line are historical (as of 2026-05-25), kept as the working record of Phase A.*
 
 ---
 

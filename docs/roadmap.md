@@ -2,7 +2,7 @@
 
 Living document — the **strategic** view of the project. The **executable, checkpointed plan** lives in `docs/build-plan/`; that directory is the operational source of truth for day-to-day work. Significant pivots get a corresponding ADR in `docs/decisions/`.
 
-**Status as of 2026-05-23:** Phase A.0 Week 1 (plumbing) complete. Next: build-plan **Stage 1 — Feature & Label Pipeline**.
+**Status as of 2026-08-24:** Phase A complete (Stages 1, 2, 4 + closing demo; Stage 4 was pulled forward from Phase B during the Stage 3 data wait). Stage 6 (mesh-quality framework) in progress. Data strategy pivoted to a certified-synthetic corpus (ADR 014) — effective build order is 1, 2, 4, 6 → 3 → 5. Current state lives in `docs/STATUS.md`.
 
 **How the phases map to the build plan:**
 

@@ -50,4 +50,15 @@ build/
 
 # OS
 Thumbs.db
-data/_verification/
+
+# Secrets guard — never commit credentials of any kind
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+credentials*.json
+.netrc
+_netrc
+secrets*.yaml
+secrets*.yml
