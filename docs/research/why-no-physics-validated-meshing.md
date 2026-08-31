@@ -84,7 +84,7 @@ Documented architecture (HEC 2D User's Manual, Technical Reference):
 - **Any mesh change invalidates the precomputed property tables** — runtime refinement would mean regenerating elevation–volume and face-conveyance curves from full-resolution terrain, plus conservatively remapping state, at every adaptation cycle, inside a days-long transient. There is no steady-state convergence loop to hide adaptation inside.
 - The only runtime adaptivity HEC ever shipped is in **time**: Courant-based variable timestepping.
 
-The HEC-RAS 2025 ("7.0"-generation) rewrite is confirmatory: its documentation concedes 6.x users had to "trick" the mesh generator; the new face-centric conceptual-mesh system with automated heuristic post-processing (SwapEdges, Smooth, Split/Merge) is a major *generation-side ergonomics* upgrade — and there is **no adaptive, physics-validated, or ML meshing anywhere on the public roadmap**. The 2025 solver bet is explicit + GPU (implicit returning ~2027), still static-mesh.
+The HEC-RAS 2025 (next-generation) rewrite is confirmatory: its documentation concedes 6.x users had to "trick" the mesh generator; the new face-centric conceptual-mesh system with automated heuristic post-processing (SwapEdges, Smooth, Split/Merge) is a major *generation-side ergonomics* upgrade — and there is **no adaptive, physics-validated, or ML meshing anywhere on the public roadmap**. The 2025 solver bet is explicit + GPU (implicit returning ~2027), still static-mesh.
 
 ## Reason 5 — Theory gaps and institutional economics
 
@@ -222,7 +222,8 @@ tailwind.** Verified against the 2025 documentation, release notes
   leaving automated certification on the table.
 - **Market timing:** 2025 is beta ("please don't" for production), missing
   1D/structures/dam breach until ~2027; FEMA acceptance applies to 6.6.
-  The 6.x installed base — which the Stage 4 harness already targets — is
+  The classic 6.x/7.0 installed base — which the Stage 4 harness already
+  targets (verified on 7.0) — is
   the market for years, and the sanctioned 2025→6.6 mesh export
   ("mesh in 2025, solve in 6.x") lets an arcs-speaking tool serve both.
 
@@ -244,4 +245,4 @@ tailwind.** Verified against the 2025 documentation, release notes
 
 **ML meshing:** M2N (arXiv:2204.11188); UM2N (arXiv:2407.00382); E2N (arXiv:2207.11233); AMBER (arXiv:2505.23663); MeshGraphNets (arXiv:2010.03409); UM2N-tsunami application (arXiv:2603.06152).
 
-Full URLs are preserved in the session research record; spot-check any claim against the primary source before external use.
+Primary-source URLs are cited inline where load-bearing; spot-check any claim against the original source before external use.

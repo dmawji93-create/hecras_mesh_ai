@@ -4,7 +4,7 @@ This directory is the **executable, checkpointed plan** for building `hecras_mes
 
 ## How to use this directory
 
-- Work stages **in order**. Do not start stage N+1 until stage N's checkpoint criteria are all met.
+- Work stages **in dependency order** — per ADR 014 the effective order is **1, 2, 4, 6 → 3 → 5** (Stage 3's data factory depends on the Stage 4 harness and the Stage 6 certifier). Do not start a stage until its prerequisites' checkpoint criteria are all met.
 - Each stage file carries a `Status` field — keep it current (`Not started` / `In progress` / `Blocked` / `Complete`).
 - When a checkpoint passes, record how it was verified (a commit hash, a notebook, a metrics screenshot) in that stage file before moving on.
 - The plan is long-horizon. Crucially, it is structured so that **partial completion is still a usable product**: stopping after Stage 3 yields a breakline tool; after Stage 5, a static-mesh tool; after Stage 7, an adaptive-mesh tool. Every stage delivers verifiable value.
@@ -49,7 +49,7 @@ The real ML novelty lives in the warm-start (Stages 2-3) and resolution predicti
 
 ## Honest note on cost
 
-Model training is not the bottleneck — the RTX 3090 handles that. The bottleneck and main cost center is **data generation**: gathering and quality-filtering the expert-mesh corpus (Stage 3) and, more expensively, computing Richardson-extrapolation reference solutions (Stage 6), each of which is a sequence of HEC-RAS runs. Budget for data generation as the main sustained effort of the project.
+Model training is not the bottleneck — the RTX 3090 handles that. The bottleneck and main cost center is **data generation**: running the certified-synthetic label factory (Stage 3, per ADR 014) and computing Richardson-extrapolation reference solutions (Stage 6), each of which is a sequence of HEC-RAS runs. Budget for data generation as the main sustained effort of the project.
 
 ## Relationship to ADRs
 
@@ -57,6 +57,7 @@ Model training is not the bottleneck — the RTX 3090 handles that. The bottlene
 - ADR 003 (amended) — expert meshes are a prior/warm-start, not the target
 - ADR 011 — quantitative mesh-quality objective (reference solution, error functional, cost term)
 - ADR 012 — the refinement loop is numerical-methods-first; ML (Stage 8) is an optional optimization layer on a working classical loop (Stage 7)
+- ADR 014 — certified-synthetic data strategy: physics as the label certifier (supersedes ADR 013; changed the effective stage order to 1, 2, 4, 6 → 3 → 5)
 
 ## Stage list
 
@@ -72,4 +73,4 @@ Model training is not the bottleneck — the RTX 3090 handles that. The bottlene
 
 ## Claude Code kickoff
 
-> Read `CLAUDE.md`, then every file in `docs/build-plan/` in order, then the ADRs referenced above. Confirm what you understand and flag anything ambiguous. Week 1 plumbing is already complete (see `STATUS.md`). Begin with **Stage 1 — Feature & Label Pipeline**. Do not proceed past a stage's checkpoint until every exit criterion is met and verified. Teach as you go; I am new to ML.
+> Read `CLAUDE.md`, then `docs/STATUS.md` (the single source of truth for current state), then every file in `docs/build-plan/` in order, then the ADRs referenced above. Confirm what you understand and flag anything ambiguous. Resume from whatever STATUS.md marks as next — this paragraph deliberately hardcodes no project state. Do not proceed past a stage's checkpoint until every exit criterion is met and verified. Teach as you go; I am new to ML.

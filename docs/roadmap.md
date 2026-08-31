@@ -21,10 +21,10 @@ Living document — the **strategic** view of the project. The **executable, che
 
 **Deliverable:** A model + post-processing pipeline that emits a geopackage of breaklines importable into HEC-RAS RAS Mapper.
 
-**Why first:** Pure topographic CV problem with strong signal from DEM derivatives. Labels are abundant (every FEMA study has expert breaklines). Sidesteps the unsolved engineering of programmatic geometry HDF writes — emit a geopackage and import via the existing UI.
+**Why first:** Pure topographic CV problem with strong signal from DEM derivatives. *(Label sourcing revised by ADR 014 — bulk expert labels proved unobtainable; the certified-synthetic factory manufactures them instead.)* Sidesteps the unsolved engineering of programmatic geometry HDF writes — emit a geopackage and import via the existing UI.
 
 - **A.0 — Make-one-work sprint.** Single-project pilot on Muncie, then Bald Eagle Dam Break — validate the whole pipeline end-to-end at small scale before investing in bulk data. **Week 1 (plumbing) is complete.** Remaining A.0 work is detailed as build-plan **Stage 1** (feature & label pipeline) and **Stage 2** (breakline model pilot).
-- **A.1 / A.2 — Scale and harden.** Bulk FEMA NFHL/MIP corpus, deduplication and quality filtering, a curated held-out validation set, retraining, robustness across DEM resolution/CRS, ancillary-data graceful degradation. Detailed as build-plan **Stage 3**.
+- **A.1 / A.2 — Scale and harden.** The certified-synthetic corpus factory (**ADR 014**): proposal tiers on public terrain, simulation-ablation certification, an expert-audited gold set; retraining, robustness across DEM resolution/CRS, ancillary-data graceful degradation. Detailed as build-plan **Stage 3** (now dependent on Stages 4 + 6).
 
 Per ADR 003 (amended), expert meshes are used as a **prior / warm start**, not as the final target.
 
@@ -36,7 +36,7 @@ Per ADR 003 (amended), expert meshes are used as a **prior / warm start**, not a
 
 **Engineering:** The HEC-RAS automation harness — programmatic geometry-HDF5 writing, run launching, results parsing — is the enabling prerequisite. Detailed as build-plan **Stage 4** (harness) and **Stage 5** (resolution model + static-mesh assembly).
 
-**Modeling:** A resolution-field head multi-task on the shared Phase A encoder. Resolution is hydraulically driven, so the head's inputs include a-priori-knowable hydraulic context — boundary conditions, the Manning's *n* field, structures — not terrain alone. Labels from expert refinement regions; a total cell-budget acts as a constraint.
+**Modeling:** A resolution-field head multi-task on the shared Phase A encoder. Resolution is hydraulically driven, so the head's inputs include a-priori-knowable hydraulic context — boundary conditions, the Manning's *n* field, structures — not terrain alone. Labels come from the Stage 3 factory's certified resolution fields (ADR 014 Tier 2 — the pilots contain zero expert refinement regions); a total cell-budget acts as a constraint.
 
 ---
 

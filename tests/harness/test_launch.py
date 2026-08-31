@@ -290,6 +290,52 @@ def test_run_plan_com_timeout_returns_failure(tmp_path, monkeypatch):
     assert "exceeded timeout" in result.error
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="CLI test is Windows-only")
+def test_run_plan_cli_missing_exe_returns_failure_not_exception(tmp_path):
+    """A missing Ras.exe must surface as a RunResult, not an OSError that
+    discards the other backend's diagnostics."""
+    install = RasInstall(
+        version="0.0",
+        install_dir=tmp_path,
+        ras_exe=tmp_path / "does_not_exist.exe",
+        com_prog_id="RAS00.HECRASController",
+    )
+    prj = tmp_path / "demo.prj"
+    prj.write_bytes(b"")
+    result = run_plan_cli(install, prj, "01", timeout_seconds=10)
+    assert not result.success
+    assert "failed to launch" in result.error
+
+
+def test_run_plan_removes_stale_results_before_computing(tmp_path, monkeypatch):
+    """A finished results file from a PREVIOUS run must not survive into
+    the new attempt's freshness window — run_plan deletes it up front."""
+    if sys.platform != "win32":
+        pytest.skip("Windows guard fires first on non-Windows")
+    prj = tmp_path / "x.prj"
+    prj.write_bytes(b"")
+    stale = tmp_path / "x.p01.hdf"
+    _write_results_hdf(stale, solution=b"Unsteady Finished Successfully")
+
+    def _fake_backend(*_a, **_k):
+        return RunResult(False, "com", None, 0.1, error="backend stubbed out")
+
+    monkeypatch.setattr("hecras_mesh_ai.harness.launch.run_plan_com", _fake_backend)
+    monkeypatch.setattr("hecras_mesh_ai.harness.launch.run_plan_cli", _fake_backend)
+    monkeypatch.setattr(
+        "hecras_mesh_ai.harness.launch.find_ras_install",
+        lambda **_kw: RasInstall(
+            version="0.0",
+            install_dir=tmp_path,
+            ras_exe=tmp_path / "Ras.exe",
+            com_prog_id="RAS00.HECRASController",
+        ),
+    )
+    result = run_plan(prj, "01")
+    assert not result.success
+    assert not stale.exists(), "stale results file must be removed before any backend runs"
+
+
 def test_run_plan_concatenates_backend_errors(tmp_path, monkeypatch):
     """On total failure the informative backend error must not be shadowed
     by the fallback's generic one."""

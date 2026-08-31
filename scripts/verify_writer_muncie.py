@@ -1,11 +1,11 @@
 """Prepare a Muncie project copy whose geometry HDF has been round-tripped
-through `replace_breaklines`, for manual verification that HEC-RAS 6.6 can
+through `replace_breaklines`, for manual verification that HEC-RAS 7.0 can
 open it cleanly.
 
 Run:
     uv run python scripts/verify_writer_muncie.py
 
-Then open the resulting `Muncie.prj` in HEC-RAS 6.6 and confirm:
+Then open the resulting `Muncie.prj` in HEC-RAS 7.0 and confirm:
 1. Geometry loads without errors or warnings.
 2. RAS Mapper shows the same 2 breaklines (Road 1, HighGround 1) as the
    original.
@@ -82,7 +82,7 @@ def main() -> int:
         print(f"  - {o.name!r}: round-trip OK")
 
     print("\nDone. To verify in HEC-RAS:")
-    print("  1. Open HEC-RAS 6.6")
+    print("  1. Open HEC-RAS 7.0")
     print(f"  2. File -> Open Project -> {TARGET_PROJECT / 'Muncie.prj'}")
     print("  3. Geometry -> 2D Flow Areas: confirm both breaklines visible")
     print("  4. Check 'Computation Messages' for any HDF / schema errors")

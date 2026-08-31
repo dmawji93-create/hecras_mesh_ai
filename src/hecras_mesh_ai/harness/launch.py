@@ -154,34 +154,47 @@ def _detect_success(results_hdf: Path, start_time: float) -> bool:
     return run_completed(results_hdf)
 
 
-def _ras_pids() -> set[int]:
-    """PIDs of currently-running Ras.exe processes (empty set off-Windows/on error)."""
-    try:
-        out = subprocess.run(
-            ["tasklist", "/FI", "IMAGENAME eq Ras.exe", "/FO", "CSV", "/NH"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
-        return set()
+# The GUI/COM server plus the compute engines RAS spawns for the actual
+# solve — a timeout kill must take all of them or the orphaned solver
+# keeps burning CPU after Ras.exe dies.
+_RAS_IMAGE_NAMES = ("Ras.exe", "RasUnsteady.exe", "RasGeomPreprocess.exe", "RasSteady.exe")
+
+
+def _ras_pids() -> set[int] | None:
+    """PIDs of running HEC-RAS processes (GUI + compute engines).
+
+    Returns None when the snapshot itself fails. Callers MUST treat an
+    unknown baseline as "do not kill anything" — an empty-by-error
+    baseline would make the timeout path sweep up unrelated interactive
+    HEC-RAS sessions.
+    """
     pids: set[int] = set()
-    for line in out.splitlines():
-        parts = [p.strip('"') for p in line.split('","')]
-        if len(parts) >= 2 and parts[0].lower() == "ras.exe":
-            with contextlib.suppress(ValueError):
-                pids.add(int(parts[1]))
+    for image in _RAS_IMAGE_NAMES:
+        try:
+            out = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {image}", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
+        for line in out.splitlines():
+            parts = [p.strip('"') for p in line.split('","')]
+            if len(parts) >= 2 and parts[0].lower() == image.lower():
+                with contextlib.suppress(ValueError):
+                    pids.add(int(parts[1]))
     return pids
 
 
 def _kill_ras_pids(pids: set[int]) -> list[int]:
-    """Force-kill the given Ras.exe PIDs; returns those we attempted."""
+    """Force-kill the given PIDs and their process trees (`taskkill /T`)."""
     killed: list[int] = []
     for pid in sorted(pids):
         with contextlib.suppress(OSError, subprocess.SubprocessError):
             subprocess.run(
-                ["taskkill", "/PID", str(pid), "/F"],
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
                 capture_output=True,
                 timeout=15,
                 check=False,
@@ -329,8 +342,13 @@ def run_plan_com(
     The COM session runs in a worker thread (its own COM apartment)
     bounded by `timeout_seconds`. `Compute_CurrentPlan(blocking=True)`
     has no timeout of its own — a non-converging solve or a modal
-    dialog would otherwise block Python forever. On expiry, Ras.exe
-    processes spawned since this attempt started are force-killed.
+    dialog would otherwise block Python forever. On expiry, HEC-RAS
+    process trees spawned since this attempt started are force-killed.
+
+    SINGLE-FLIGHT ASSUMPTION: the timeout kill diffs a machine-wide
+    process snapshot, so it assumes at most ONE harness run at a time
+    on this machine. The parallel data factory (Stage 3) must isolate
+    runs (job objects / one run per VM) before parallelizing.
 
     `start_wall` lets the orchestrator share one run-start timestamp
     across backends for the freshness check; defaults to now.
@@ -376,16 +394,18 @@ def run_plan_com(
     thread.join(timeout_seconds)
 
     if thread.is_alive():
-        killed = _kill_ras_pids(_ras_pids() - pids_before)
+        pids_after = _ras_pids()
+        if pids_before is None or pids_after is None:
+            killed_msg = "kill skipped (process baseline unavailable — see _ras_pids)"
+        else:
+            killed = _kill_ras_pids(pids_after - pids_before)
+            killed_msg = f"killed HEC-RAS process trees {killed or '(none found)'}"
         return RunResult(
             success=False,
             backend="com",
             results_hdf=None,
             duration_seconds=time.monotonic() - start,
-            error=(
-                f"COM compute exceeded timeout_seconds={timeout_seconds}; "
-                f"killed Ras.exe pids {killed or '(none found)'}"
-            ),
+            error=f"COM compute exceeded timeout_seconds={timeout_seconds}; {killed_msg}",
         )
     if not box:
         return RunResult(
@@ -433,6 +453,16 @@ def run_plan_cli(
             text=True,
             timeout=timeout_seconds,
             check=False,
+        )
+    except OSError as e:
+        # Missing/renamed Ras.exe must surface as a RunResult, not an
+        # exception that discards the other backend's diagnostics.
+        return RunResult(
+            success=False,
+            backend="cli",
+            results_hdf=None,
+            duration_seconds=time.monotonic() - start,
+            error=f"failed to launch {install.ras_exe}: {e}",
         )
     except subprocess.TimeoutExpired as e:
         return RunResult(
@@ -528,6 +558,27 @@ def run_plan(
 
     if prefer not in {"com", "cli"}:
         raise ValueError(f"prefer must be 'com' or 'cli'; got {prefer!r}")
+
+    # Remove any previous results file up front. This makes freshness
+    # detection trivially sound: nothing a backend can find at
+    # expected_hdf predates this run — no 1-second-slack edge cases, no
+    # stale-but-finished file from an earlier compute, no partially
+    # rewritten file carrying an old Solution marker.
+    expected_hdf = _expected_results_hdf(project_prj, plan_id)
+    if expected_hdf.exists():
+        try:
+            expected_hdf.unlink()
+        except OSError as e:
+            return RunResult(
+                success=False,
+                backend=prefer,
+                results_hdf=None,
+                duration_seconds=0.0,
+                error=(
+                    f"could not remove stale results file {expected_hdf} "
+                    f"(locked by an open HEC-RAS session?): {e}"
+                ),
+            )
 
     start_wall = time.time()
     order = [prefer, "cli" if prefer == "com" else "com"]

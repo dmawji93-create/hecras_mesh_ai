@@ -43,6 +43,7 @@ Dependencies are split into `dev`, `ml`, and `harness` (Windows-only, pywin32 fo
 - **Roadmap & build plan** — living documents; update as work completes.
 - **Commits** — conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
 - **Stage discipline** — do not start a build-plan stage until the previous stage's checkpoint criteria are all met and verified.
+- **Step audits** — after each completed build-plan task/stage or substantial fix batch, run an independent adversarial audit of the delta *before* starting the next step: verify the change does what it claims, hunt for defects the change introduced, and confirm docs/plan stayed in sync. Record findings and dispositions in `docs/STATUS.md` or the stage file. (Owner-directed standing practice, 2026-08-24 — the full audit showed that deferred review compounds; delta audits at step boundaries are cheap.)
 
 ## Repository layout
 
@@ -63,6 +64,7 @@ hecras_mesh_ai/
 │   ├── decisions/                  # ADRs 000-014
 │   ├── build-plan/                 # executable checkpointed stages 00-09
 │   ├── hdf-schema/                 # reverse-engineered HEC-RAS HDF schema notes
+│   ├── learning/                   # study notes and teaching artifacts
 │   └── research/                   # why-this-tool-exists research note + one-pager
 ├── src/hecras_mesh_ai/             # the package (features, labels, dataset, model,
 │                                   #   postprocess, harness, benchmark)

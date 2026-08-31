@@ -11,7 +11,7 @@ refinement regions, resolution choices) to train a generalizing model. The
 acquisition strategy in ADR 013 is dead or blocked:
 
 - **NOAA OWP S3 (ADR 013 Phase 3A, primary): dead.** ESIP credentials were
-  requested 2026-05-24 (Carson Pruitt / Fernando Salas). No response after
+  requested 2026-05-24 (via the NOAA OWP contacts). No response after
   13 weeks. Treated as a no.
 - **Client data: unavailable.** Client work products are not available
   for model training. No internal corpus, ever.
@@ -181,8 +181,9 @@ corpus exists.
 - **Self-supervised terrain pretraining** (replacing ImageNet weights):
   strongly indicated by the 2026-08 audit's normalization finding;
   deserves its own ADR when designed.
-- **Farm platform:** HEC-RAS 6.x COM (works today) vs 2025 headless/GPU
-  (faster, beta). Start 6.x; migrate when 2025's solver stabilizes.
+- **Farm platform:** classic HEC-RAS COM (verified on 7.0; works today)
+  vs 2025 headless/GPU (faster, beta). Start classic; migrate when
+  2025's solver stabilizes.
 - **Product surface:** RAS 2025's conceptual mesh (arcs + metadata) as
   the emission format for Phase B — separate ADR when Phase B starts.
 
@@ -195,9 +196,9 @@ corpus exists.
 - `docs/research/why-no-physics-validated-meshing.md` — market/positioning
   research; the "calibration absorbs mesh error only where calibration
   data exists" cornerstone; HEC-RAS 2025 competitive assessment
-- 2026-08-23 system audit (session record; findings summarized in the
-  research note's project memory) — harness-trust and training-methodology
-  prerequisites
+- 2026-08 system audit (owner's working notes; prerequisite findings
+  summarized in `docs/STATUS.md`, 2026-08 resumption section) —
+  harness-trust and training-methodology prerequisites
 - USGS 3DEP, USACE National Levee Database, NHDPlus HR, NLCD, USGS
   StreamStats regional regression equations
 - Prior art: AMBER (arXiv:2505.23663 — expert-imitating resolution

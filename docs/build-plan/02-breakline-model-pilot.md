@@ -1,7 +1,7 @@
 # Stage 2 — Breakline Model (Pilot)
 
 **Type:** ML
-**Status:** Complete (2026-05-23; ~16 commits ending 2fdb1a5 — results and caught bugs in `docs/STATUS.md`. Recorded deviation: CSVLogger shipped instead of W&B; W&B decision deferred to Stage 3.)
+**Status:** Complete (2026-05-23; ~13 commits ending 2fdb1a5 — results and caught bugs in `docs/STATUS.md`. Recorded deviation: CSVLogger shipped instead of W&B; W&B decision deferred to Stage 3.)
 **Depends on:** Stage 1
 **Maps to:** roadmap Phase A.0 Weeks 3-4
 

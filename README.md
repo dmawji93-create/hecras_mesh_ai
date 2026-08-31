@@ -30,7 +30,7 @@ PyTorch + Lightning + segmentation_models_pytorch + TorchGeo, on the standard Py
 ```bash
 uv sync --extra dev --extra ml --extra harness
 uv run pre-commit install
-uv run pytest -m "not slow"
+uv run python -m pytest -m "not slow"
 ```
 
 Notes:
@@ -38,7 +38,7 @@ Notes:
 - The `ml` extra resolves `torch`/`torchvision` from the PyTorch CUDA 12.8 index and is Windows + CUDA specific — see [ADR 010](docs/decisions/010-cuda-platform.md).
 - The `harness` extra (pywin32) is Windows-only and needed only for driving HEC-RAS.
 - Tests marked `slow` launch a real local HEC-RAS 7.0 install; the default selection above skips them.
-- **Pilot data is not included.** The pilots use the official HEC-RAS example projects (Muncie; Bald Eagle Dam Break), installable from HEC-RAS itself (*Help → Install Example Projects*); place them under `data/raw/usace/RAS Samples/`. Trained checkpoints and cached features are likewise gitignored and regenerable (`scripts/train_pilot.py`, notebook 03).
+- **Pilot data is not included.** The pilots use the official HEC-RAS example projects (Muncie; Bald Eagle Dam Break), installable from HEC-RAS itself (via its example-projects installer); place them so the tree reads `data/raw/usace/RAS Samples/Example_Projects_7_0/2D Unsteady Flow Hydraulics/{Muncie, BaldEagleCrkMulti2D}/…` — the exact paths the tests and scripts expect. Trained checkpoints and cached features are likewise gitignored and regenerable (`scripts/train_pilot.py`, notebook 03).
 
 ## Project documentation
 

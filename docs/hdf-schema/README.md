@@ -98,7 +98,7 @@ emit standalone geometries (it doesn't for v1).
 - **HEC-RAS version compatibility.** Muncie was saved with HEC-RAS 6.3 Beta 2
   (Dec 2019); Bald Eagle with 6.2.0 (Mar 2022). Bald Eagle has additional
   derived datasets (`Cells Center Manning's n`, sub-grid bathymetry tables,
-  `Infiltration/*`) not present in Muncie. **Question:** does HEC-RAS 6.6
+  `Infiltration/*`) not present in Muncie. **Question:** does HEC-RAS 7.0
   (current at 2026) require the newer derived datasets to be present when
   reading an older-format HDF? Answer: test by writing Muncie-style and
   opening in current HEC-RAS.

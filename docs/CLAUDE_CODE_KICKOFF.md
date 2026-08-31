@@ -1,6 +1,6 @@
 # Claude Code Kickoff Prompt
 
-Paste the message below as your **first message** in a Claude Code session to resume the project. The repository already exists and Phase A.0 Week 1 is complete — this is a resume prompt, not a from-scratch scaffold.
+Paste the message below as your **first message** in a Claude Code session to resume the project. This is a resume prompt, not a from-scratch scaffold — and it deliberately hardcodes no project state: **`docs/STATUS.md` is the single source of truth** for what is done and what is next. (Any counts or "next step" statements you find in this file's history were stale within weeks; state lives in STATUS.md only.)
 
 ---
 
@@ -9,7 +9,7 @@ Hi Claude. This is an ongoing project. Before doing anything else, read, in this
 1. `CLAUDE.md` — canonical project context.
 2. `docs/STATUS.md` — current status.
 3. `docs/hec-ras-primer.md` — domain background.
-4. Every ADR in `docs/decisions/` — there are thirteen files, `000-template.md` through `012-refinement-numerical-first.md`. Note that ADR 003 carries a dated amendment.
+4. Every ADR in `docs/decisions/` — `000-template.md` upward; note the dated amendments (003) and supersessions (013 → 014).
 5. `docs/roadmap.md` — the strategic phased plan.
 6. Every file in `docs/build-plan/` in order, `00` through `09` — the executable, checkpointed plan.
 

@@ -28,6 +28,7 @@ row`.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import h5py
@@ -63,12 +64,24 @@ def _solution_status_from(f: h5py.File) -> str:
 
 
 def solution_status(hdf_path: Path | str) -> str:
-    """The solver's completion marker for a results HDF ('' when absent/unreadable)."""
-    try:
-        with h5py.File(Path(hdf_path), "r") as f:
-            return _solution_status_from(f)
-    except OSError:
-        return ""
+    """The solver's completion marker for a results HDF ('' when absent/unreadable).
+
+    Retries briefly on OSError while the file exists: a transient
+    Windows sharing violation (engine still releasing the file) must
+    not read as "run did not finish" — that false negative would send
+    the launcher into a pointless fallback recompute.
+    """
+    path = Path(hdf_path)
+    for attempt in range(3):
+        try:
+            with h5py.File(path, "r") as f:
+                return _solution_status_from(f)
+        except OSError:
+            if not path.exists():
+                return ""
+            if attempt < 2:
+                time.sleep(0.4)
+    return ""
 
 
 def run_completed(hdf_path: Path | str) -> bool:

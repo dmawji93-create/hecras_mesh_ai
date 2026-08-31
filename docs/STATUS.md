@@ -1,6 +1,6 @@
 # Project Status — `hecras_mesh_ai`
 
-**As of:** 2026-08-24
+**As of:** 2026-08-24 *(doc dates are working-session dates; commit timestamps run a few days later on the machine clock)*
 **Phase:** Phase A complete (Stages 1, 2, 4 + closing demo). **Stage 6 (mesh-quality framework) in progress.** Data strategy pivoted to the certified-synthetic factory (**ADR 014**); effective build order 1, 2, 4, 6 → 3 → 5. Next: wire the Thacker benchmark into a HEC-RAS project, then the Stage 6 grid-refinement runner.
 **Repo:** `C:\dev\hecras_mesh_ai\`
 **Branch:** `main` · remote: `github.com/dmawji93-create/hecras_mesh_ai` — **public, MIT-licensed** since 2026-08-24
@@ -14,7 +14,8 @@
 - **Audit fixes landed (2026-08-24).** Thacker deployment defects (raster extent to (1+A)a, closed-form c0, exact registration, comparison protocol documented, independent-value + SWE-residual tests) — commit 6c548cb. Harness trust gaps (success requires fresh AND finished results via the `Solution` marker; COM timeout with orphan kill; in-place write opt-in; multi-part breakline refusal; completion-gated results parsing) — commit c7ff98a, verified against live HEC-RAS 7.0.
 - **Open-sourced.** MIT license, repo public, GitHub secret scanning + push protection enabled; full-history secret sweep clean.
 - **Bookkeeping correction:** the "Stage 5" label used below for the ML×harness wiring was a misnomer — build-plan Stage 5 is the resolution model. The wiring shipped as `scripts/phase_a_closing_demo.py` (commit 92c42ea, 2026-05-25): model → sliding-window inference → polylines → `replace_breaklines` → COM run → results parse, end-to-end on Muncie; the pipeline proved robust to bad model output (41 predicted breaklines land dry; max depth identical to baseline). An automated ML→harness integration test is still owed.
-- Still open: degenerate CLI fallback (COM primary; now completion-guarded), raster row-direction assumption (unchanged), W&B not wired (decide at Stage 3), remaining audit minors (tracked in session record), pre-commit ruff pinned older than dev ruff.
+- Still open: degenerate CLI fallback (COM primary; now completion-guarded), raster row-direction assumption (unchanged), W&B not wired (decide at Stage 3), remaining audit minors (tracked in the owner's working notes, not in-repo), pre-commit ruff pinned older than dev ruff.
+- **Step audit of this resumption batch (2026-08, two adversarial reviews):** all 12 audit fixes verified genuinely closed — closed forms independently re-derived; mutation experiments confirmed the new Thacker tests catch a wrong ω, a sign-flipped u, and a wrong c0. Follow-ups applied same day: the timeout kill now takes the full HEC-RAS process tree (`RasUnsteady.exe` et al., `taskkill /T`), `run_plan` clears stale results files before computing (makes freshness detection sound), lock-tolerant completion reads, a kill-baseline safety guard, CLI launch-failure capture, and doc reconciliations (roadmap body aligned to ADR 014; HEC-RAS 7.0 version story; kickoff/overview refresh). Accepted constraint: the PID-diff kill assumes one harness run per machine — the parallel factory must isolate runs (documented in `launch.py` and the Stage 3 notes).
 
 *Counts and "next" statements below this line are historical (as of 2026-05-25), kept as the working record of Phase A.*
 
@@ -101,7 +102,7 @@ GPU verified with a 4096×4096 matmul on `cuda:0` (~200 MB VRAM used).
 
 ## Known open items
 
-- **NOAA ESIP credentials request in flight** (sent 2026-05-24 from gmail to Carson Pruitt + Fernando Salas). Stage 3 (bulk-corpus harvesting via `s3://noaa-nws-owp-fim/ras2fim`) cannot start until creds arrive. Latency: days to weeks.
+- **NOAA ESIP credentials request in flight** (sent 2026-05-24 to the NOAA OWP team). Stage 3 (bulk-corpus harvesting via `s3://noaa-nws-owp-fim/ras2fim`) cannot start until creds arrive. Latency: days to weeks.
 - **HEC-RAS CLI is undocumented for 7.0.** The launcher's CLI fallback runs `Ras.exe -c <prj> p<NN>` which exits 0 but doesn't actually compute. COM is the working primary; CLI fallback is degenerate. Not blocking — COM works — but a real CLI path would simplify batch contexts.
 - **Project folder name has spaces** in the data path (`…/RAS Samples/Example_Projects_7_0/2D Unsteady Flow Hydraulics/…`). Working fine for `rashdf` and `rasterio`; flag if a CLI tool ever mishandles it.
 
@@ -115,7 +116,7 @@ GPU verified with a 4096×4096 matmul on `cuda:0` (~200 MB VRAM used).
 - **CRS embedding behavior characterized** (Stage 1 Task 1, 2026-05-23). Variable across HDFs; pipeline needs prefer-HDF-fall-back-terrain resolver. Both Muncie and 11/12 Bald Eagle geometries fall back to terrain; `g09` is the HDF-embedded case.
 - **`rashdf.refinement_regions()` empty-frame bug** — no longer surfaces under 0.12.0; returns `len() == 0` cleanly on all 12 Bald Eagle geometries and Muncie.
 
-**Build-plan Stage 2 — Breakline Model Pilot (complete, 2026-05-23).** All eight tasks landed across ~16 commits:
+**Build-plan Stage 2 — Breakline Model Pilot (complete, 2026-05-23).** All eight tasks landed across ~13 commits:
 
 | Task | Module | Tests |
 |---|---|---|
@@ -123,7 +124,7 @@ GPU verified with a 4096×4096 matmul on `cuda:0` (~200 MB VRAM used).
 | 2 — BCE + Dice loss | `src/hecras_mesh_ai/model/loss.py` | 13 |
 | 1b — BreaklineUNet LightningModule (smp U-Net + ResNet-18 + ImageNet) | `src/hecras_mesh_ai/model/unet.py` | 10 |
 | 3 — Training script with CSVLogger | `scripts/train_pilot.py` | (smoke) |
-| 4 — Overfit sanity check (BCE 0.79→0.024, Dice 0.98→0.35) | commit `7210cfa` | runs on GPU |
+| 4 — Overfit sanity check (BCE 0.79→0.024, Dice 0.98→0.35) | commit `5c01a48` | runs on GPU |
 | 5 — Full pilot training (30 epochs, ~17 min on RTX 3090) | `lightning_logs/pilot/` | live |
 | 6 — Probability-to-polylines post-processing | `src/hecras_mesh_ai/postprocess/breaklines.py` | 8 |
 | 7 — Buffered IoU/F1 metrics + sliding-window inference | `src/hecras_mesh_ai/postprocess/{metrics,inference}.py` | 16 |
